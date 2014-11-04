@@ -20,6 +20,7 @@ class Converter:
 		self.dwdata = {} # setting data loaded from the dokuwiki
 		self.users = {} # user data loaded from the dokuwiki
 		self.changelog = [] # (timestamp, ip, changetype, pagename, author, comment)
+		self.pagechanges = {} # { pagepath: (timestamp, ip, changetype, pagename, author, comment) }
 		self.commands = [] # shell commands to run
 
 	def create_git_repository(self):
@@ -70,10 +71,12 @@ class Converter:
 			parts = filename.rsplit('.', 2 if fnmatch.fnmatch(filename, '*.txt') else 3)
 			return parts[0], parts[1] # pagepath, timestamp
 
-		def has_changelog_entry(pagepath, timestamp):
-			for c in self.changelog:
-				if timestamp == c[0] and pagepath == c[3].replace(':', '/'):
-					return
+		def check_changelog_entry(pagepath, timestamp):
+			pagepath = pagepath.replace('/', ':')
+			if pagepath in self.pagechanges:
+				for c in self.pagechanges[pagepath]:
+					if timestamp == c[0] and pagepath == c[3]:
+						return
 			log.warn('Attic contains "%s" timestamp %s, but is not referenced by changelog, skipping. Please report this!' % (pagepath, timestamp))
 
 		log.info('Reading attic')
@@ -98,7 +101,7 @@ class Converter:
 				if fnmatch.fnmatch(f, '*.txt') or fnmatch.fnmatch(f, '*.txt.gz') or fnmatch.fnmatch(f, '*.txt.bz2'):
 					filename = os.path.join(path, f)
 					pagepath, timestamp = get_pagepath_and_timestamp(filename)
-					has_changelog_entry(pagepath, timestamp)
+					check_changelog_entry(pagepath, timestamp)
 
 	def read_data(self):
 		self.commands.append('git init --quiet')
@@ -144,6 +147,10 @@ class Converter:
 					assert(changeparts[3] == pagename)
 					assert(changeparts[2] in ('C', 'D', 'E', 'e', 'R')) # create, delete, edit, minor edit, restore
 					self.changelog.append(changeparts)
+					if pagename in self.pagechanges:
+						self.pagechanges[pagename].append(changeparts)
+					else:
+						self.pagechanges[pagename] = [changeparts]
 
 		log.info('Reading meta')
 		pages = 0
