@@ -51,9 +51,7 @@ class Converter:
 
 		def has_changelog_entry(pagepath, timestamp):
 			for c in self.changelog:
-				ts = c[0]
-				pagename = c[3]
-				if timestamp == ts and pagepath == pagename.replace(':', '/'):
+				if timestamp == c[0] and pagepath == c[3].replace(':', '/'):
 					return
 			log.warn('Attic contains "%s" timestamp %s, but is not referenced by changelog, skipping. Please report this!' % (pagepath, timestamp))
 
@@ -61,18 +59,18 @@ class Converter:
 
 		# Check that all referenced pages exist in attic
 		for c in self.changelog:
+			timestamp = c[0]
 			pagepath = c[3].replace(':', '/')
-			filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt' % c[0])
+			filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt' % timestamp)
 			if not os.path.exists(filename):
-				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.gz' % c[0])
+				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.gz' % timestamp)
 			if not os.path.exists(filename):
-				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.bz2' % c[0])
+				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.bz2' % timestamp)
 			if not os.path.exists(filename):
 				log.warn('Attic of page "%s" with timestamp "%s" does not exist, despite being in changelog, skipping' % (pagepath, timestamp))
 				continue
 
 			# depending on type of change, either add or remove
-			pagepath, timestamp = get_pagepath_and_timestamp(filename)
 			pagefile = os.path.join('pages', pagepath + '.txt')
 			message = pagepath + ': ' + c[5]
 			user = c[4]
