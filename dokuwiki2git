@@ -35,6 +35,34 @@ class Converter:
 				raise RuntimeError('Command "%s" failed' % c)
 		os.chdir(origdir)
 
+	def add_page_commit(self, source_file, timestamp, ip, type, pagepath, user, message, extra):
+		# depending on type of change, either add or remove
+		target_file = os.path.join('pages', pagepath + '.txt')
+		message = pagepath + ': ' + message
+		email = 'dokuwiki@%s' % (ip)
+		if len(user) == 0:
+			user = 'dokuwiki2git'
+		elif user in self.users:
+			email = self.users[user]['email']
+			user = self.users[user]['name']
+		author = '%s <%s>' % (user, email)
+		cmds = []
+		if type in ('C', 'E', 'e', 'R'): # create, edit, minor edit, restore
+			dirname = os.path.dirname(target_file)
+			if len(dirname) > 0:
+				cmds.append('mkdir -p %s' % self.shell_quote(dirname))
+			if fnmatch.fnmatch(source_file, '*.txt'):
+				cmds.append('cp -a %s %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
+			elif fnmatch.fnmatch(source_file, '*.txt.gz'):
+				cmds.append('gunzip -c %s > %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
+			elif fnmatch.fnmatch(source_file, '*.txt.bz2'):
+				cmds.append('bunzip2 -c %s > %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
+			cmds.append('git add %s' % self.shell_quote(target_file))
+		elif type == 'D': # delete
+			cmds.append('git rm --quiet %s' % self.shell_quote(target_file))
+		cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
+		self.commands.extend(cmds)
+
 	def read_attic(self):
 
 		def get_pagepath_and_timestamp(filename):
@@ -62,34 +90,7 @@ class Converter:
 			if not os.path.exists(filename):
 				log.warn('Attic of page "%s" with timestamp "%s" does not exist, despite being in changelog, skipping' % (pagepath, timestamp))
 				continue
-
-			# depending on type of change, either add or remove
-			pagefile = os.path.join('pages', pagepath + '.txt')
-			message = pagepath + ': ' + c[5]
-			user = c[4]
-			email = 'dokuwiki@%s' % (c[1])
-			if len(user) == 0:
-				user = 'dokuwiki2git'
-			elif user in self.users:
-				email = self.users[user]['email']
-				user = self.users[user]['name']
-			author = '%s <%s>' % (user, email)
-			cmds = []
-			if c[2] in ('C', 'E', 'e', 'R'): # create, edit, minor edit, restore
-				dirname = os.path.dirname(pagefile)
-				if len(dirname) > 0:
-					cmds.append('mkdir -p %s' % self.shell_quote(dirname))
-				if fnmatch.fnmatch(filename, '*.txt'):
-					cmds.append('cp -a %s %s' % (self.shell_quote(filename), self.shell_quote(pagefile)))
-				elif fnmatch.fnmatch(filename, '*.txt.gz'):
-					cmds.append('gunzip -c %s > %s' % (self.shell_quote(filename), self.shell_quote(pagefile)))
-				elif fnmatch.fnmatch(filename, '*.txt.bz2'):
-					cmds.append('bunzip2 -c %s > %s' % (self.shell_quote(filename), self.shell_quote(pagefile)))
-				cmds.append('git add %s' % self.shell_quote(pagefile))
-			elif c[2] == 'D': # delete
-				cmds.append('git rm --quiet %s' % self.shell_quote(pagefile))
-			cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
-			self.commands.extend(cmds)
+			self.add_page_commit(filename, timestamp, c[1], c[2], pagepath, c[4], c[5], c[6])
 
 		# check that all pages in attic have a matching changelog entry
 		for path, dirs, files in os.walk(self.dwdata['conf']['olddir'].encode('UTF-8')):
