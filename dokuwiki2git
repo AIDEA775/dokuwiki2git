@@ -96,7 +96,7 @@ class Converter:
 				cmds.append('git add %s' % self.shell_quote(pagefile))
 			elif c[2] == 'D': # delete
 				cmds.append('git rm --quiet %s' % self.shell_quote(pagefile))
-			cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s" +0000" -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
+			cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
 			self.commands.extend(cmds)
 
 		# check that all pages in attic have a matching changelog entry
