@@ -44,7 +44,7 @@ class Converter:
 
 	def get_pagepath_and_timestamp(self, filename):
 		filename = os.path.relpath(filename, self.dwdata['conf']['olddir'].encode('UTF-8'))
-		parts = filename.rsplit('.', 3)
+		parts = filename.rsplit('.', 2 if fnmatch.fnmatch(filename, '*.txt') else 3)
 		return parts[0], parts[1] # pagepath, timestamp
 
 	def has_changelog_entry(self, pagepath, timestamp):
@@ -61,9 +61,13 @@ class Converter:
 		# Check that all referenced pages exist in attic
 		for c in self.changelog:
 			pagepath = c[3].replace(':', '/')
-			filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.gz' % c[0])
+			filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt' % c[0])
 			if not os.path.exists(filename):
-				log.warn('File "%s" does not exist, despite being in changelog, skipping' % filename)
+				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.gz' % c[0])
+			if not os.path.exists(filename):
+				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.bz2' % c[0])
+			if not os.path.exists(filename):
+				log.warn('Attic of page "%s" with timestamp "%s" does not exist, despite being in changelog, skipping' % (pagepath, timestamp))
 				continue
 
 			# depending on type of change, either add or remove
@@ -83,7 +87,12 @@ class Converter:
 				dirname = os.path.dirname(pagefile)
 				if len(dirname) > 0:
 					cmds.append('mkdir -p %s' % self.shell_quote(dirname))
-				cmds.append('gunzip -c %s > %s' % (self.shell_quote(filename), self.shell_quote(pagefile)))
+				if fnmatch.fnmatch(filename, '*.txt'):
+					cmds.append('cp -a %s %s' % (self.shell_quote(filename), self.shell_quote(pagefile)))
+				elif fnmatch.fnmatch(filename, '*.txt.gz'):
+					cmds.append('gunzip -c %s > %s' % (self.shell_quote(filename), self.shell_quote(pagefile)))
+				elif fnmatch.fnmatch(filename, '*.txt.bz2'):
+					cmds.append('bunzip2 -c %s > %s' % (self.shell_quote(filename), self.shell_quote(pagefile)))
 				cmds.append('git add %s' % self.shell_quote(pagefile))
 			elif c[2] == 'D': # delete
 				cmds.append('git rm --quiet %s' % self.shell_quote(pagefile))
@@ -93,7 +102,7 @@ class Converter:
 		# check that all pages in attic have a matching changelog entry
 		for path, dirs, files in os.walk(self.dwdata['conf']['olddir'].encode('UTF-8')):
 			for f in files:
-				if fnmatch.fnmatch(f, '*.txt.gz'):
+				if fnmatch.fnmatch(f, '*.txt') or fnmatch.fnmatch(f, '*.txt.gz') or fnmatch.fnmatch(f, '*.txt.bz2'):
 					filename = os.path.join(path, f)
 					pagepath, timestamp = self.get_pagepath_and_timestamp(filename)
 					self.has_changelog_entry(pagepath, timestamp)
