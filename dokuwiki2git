@@ -83,12 +83,12 @@ class Converter:
 			if c[2] in ('C', 'E', 'e', 'R'): # create, edit, minor edit, restore
 				dirname = os.path.dirname(pagefile)
 				if len(dirname) > 0:
-					cmds.append('mkdir -p "%s"' % dirname)
-				cmds.append('gunzip -c "%s" > "%s"' % (filename, pagefile))
-				cmds.append('git add "%s"' % pagefile)
+					cmds.append('mkdir -p %s' % self.shell_quote(dirname))
+				cmds.append('gunzip -c %s > %s' % (self.shell_quote(filename), self.shell_quote(pagefile)))
+				cmds.append('git add %s' % self.shell_quote(pagefile))
 			elif c[2] == 'D': # delete
-				cmds.append('git rm --quiet "%s"' % pagefile)
-			cmds.append('git commit --quiet --allow-empty --allow-empty-message --author="%s" --date="%s +0000" -m "%s"' % (author, timestamp, message.replace('"', '\\"')))
+				cmds.append('git rm --quiet %s' % self.shell_quote(pagefile))
+			cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s" +0000" -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
 			self.commands.extend(cmds)
 
 		# check that all pages in attic have a matching changelog entry
@@ -120,9 +120,9 @@ class Converter:
 				filename = os.path.relpath(fullfile, self.datadir)
 				dirname = os.path.dirname(filename)
 				cmds = [
-					'mkdir -p "%s"' % dirname,
-					'cp "%s" "%s"' % (fullfile, filename),
-					'git add "%s"' % filename
+					'mkdir -p %s' % self.shell_quote(dirname),
+					'cp %s %s' % (self.shell_quote(fullfile), self.shell_quote(filename)),
+					'git add %s' % self.shell_quote(filename)
 				]
 				self.commands.extend(cmds)
 		self.commands.append('git commit --quiet --allow-empty --author="dokuwiki2git <dokuwiki2git@hoxu.github.com>" -m "Import media files"')
@@ -199,6 +199,9 @@ class Converter:
 		self.atticdir = os.path.join(self.datadir, 'attic')
 		self.mediadir = os.path.join(self.datadir, 'media')
 		log.info('Using datadir: %s' % self.datadir)
+
+	def shell_quote(self, str):
+		return "'" + str.replace("'", "'\\''") + "'"
 
 if __name__ == '__main__':
 	c = Converter()
