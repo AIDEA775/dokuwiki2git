@@ -46,7 +46,7 @@ class Converter:
 	def get_pagepath_and_timestamp(self, filename):
 		filename = os.path.relpath(filename, self.atticdir)
 		parts = filename.rsplit('.', 3)
-		return parts[0], parts[1] # pagepath, filename
+		return parts[0], parts[1] # pagepath, timestamp
 
 	def has_changelog_entry(self, pagepath, timestamp):
 		for c in self.changelog:
