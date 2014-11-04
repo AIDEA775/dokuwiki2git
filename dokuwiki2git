@@ -110,7 +110,8 @@ class Converter:
 	def read_data(self):
 		self.commands.append('git init --quiet')
 		# find user Real Name and email
-		self.read_user_data()
+		if self.dwdata['conf']['authtype'] == 'authplain':
+			self.read_user_data()
 		# go through data/meta
 		self.read_meta()
 		# sort history
