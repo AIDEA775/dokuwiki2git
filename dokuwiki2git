@@ -3,6 +3,7 @@
 # License: AGPLv3
 import fnmatch
 import logging
+import json
 import optparse
 import os
 import subprocess
@@ -14,17 +15,15 @@ dokuwiki2git converts dokuwiki data directory into a git repository containing
 the wiki pages, with proper history. Thus, migration to git-backed wiki engines
 (eg. gollum) becomes easier.
 
-$ dokuwiki2git [options] /path/to/dokuwiki/data"""
+$ dokuwiki2git [options] /path/to/dokuwiki"""
 
 logging.basicConfig(level = logging.DEBUG, format = '%(levelname)s - %(message)s')
 log = logging.getLogger()
 
 class Converter:
 	def __init__(self):
-		self.datadir = None
-		self.atticdir = None
-		self.mediadir = None
-		self.metadir = None
+		self.dwdir = None
+		self.dwdata = {} # data loaded from dokuwiki
 		self.changelog = [] # (timestamp, ip, changetype, pagename, author, comment)
 		self.commands = [] # commands to run to create the git repository
 		self.outputdir = 'gitdir'
@@ -44,7 +43,7 @@ class Converter:
 		os.chdir(origdir)
 
 	def get_pagepath_and_timestamp(self, filename):
-		filename = os.path.relpath(filename, self.atticdir)
+		filename = os.path.relpath(filename, self.dwdata['conf']['olddir'].encode('UTF-8'))
 		parts = filename.rsplit('.', 3)
 		return parts[0], parts[1] # pagepath, timestamp
 
@@ -62,7 +61,7 @@ class Converter:
 		# Check that all referenced pages exist in attic
 		for c in self.changelog:
 			pagepath = c[3].replace(':', '/')
-			filename = os.path.join(self.atticdir, pagepath + '.%s.txt.gz' % c[0])
+			filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.gz' % c[0])
 			if not os.path.exists(filename):
 				log.warn('File "%s" does not exist, despite being in changelog, skipping' % filename)
 				continue
@@ -92,7 +91,7 @@ class Converter:
 			self.commands.extend(cmds)
 
 		# check that all pages in attic have a matching changelog entry
-		for path, dirs, files in os.walk(self.atticdir):
+		for path, dirs, files in os.walk(self.dwdata['conf']['olddir'].encode('UTF-8')):
 			for f in files:
 				if fnmatch.fnmatch(f, '*.txt.gz'):
 					filename = os.path.join(path, f)
@@ -114,10 +113,10 @@ class Converter:
 
 	def read_media(self):
 		log.info('Reading media')
-		for path, dirs, files in os.walk(self.mediadir):
+		for path, dirs, files in os.walk(self.dwdata['conf']['mediadir'].encode('UTF-8')):
 			for f in files:
 				fullfile = os.path.join(path, f)
-				filename = os.path.relpath(fullfile, self.datadir)
+				filename = os.path.join('media', os.path.relpath(fullfile, self.dwdata['conf']['mediadir'].encode('UTF-8')))
 				dirname = os.path.dirname(filename)
 				cmds = [
 					'mkdir -p %s' % self.shell_quote(dirname),
@@ -130,10 +129,10 @@ class Converter:
 	def read_meta(self):
 		log.info('Reading meta')
 		pages = 0
-		for path, dirs, files in os.walk(self.metadir):
+		for path, dirs, files in os.walk(self.dwdata['conf']['metadir'].encode('UTF-8')):
 			for f in files:
 				if fnmatch.fnmatch(f, '*.changes'):
-					relpath = os.path.relpath(os.path.join(path, f), self.metadir)
+					relpath = os.path.relpath(os.path.join(path, f), self.dwdata['conf']['metadir'].encode('UTF-8'))
 					pagepath = relpath.rsplit('.', 1)[0]
 					self.read_meta_page(pagepath, os.path.join(path, f))
 					pages += 1
@@ -155,8 +154,7 @@ class Converter:
 
 	def read_user_data(self):
 		log.info('Reading users.auth.php')
-		parentdir = os.path.abspath(os.path.join(self.datadir, os.pardir))
-		users_file = os.path.join(parentdir, 'conf', 'users.auth.php')
+		users_file = self.dwdata['config_cascade']['plainauth.users']['default'].encode('UTF-8')
 		with open(users_file, 'rb') as f:
 			for line in f:
 				if not line.startswith("#") and len(line) > 1:
@@ -181,24 +179,25 @@ class Converter:
 		time_start = time.time()
 		if len(args) == 0:
 			parser.print_help()
-			log.error('Dokuwiki data directory is a required argument')
+			log.error('Dokuwiki directory is a required argument')
 			sys.exit(1)
-		self.set_datadir(args[0])
+
+		self.set_dwdata(args[0])
 		self.read_data()
 		log.info('%d commands queued to be executed' % len(self.commands))
 		self.create_git_repository()
 		time_end = time.time()
 		time_took = time_end - time_start
-		log.info('Finished converting dokuwiki data dir "%s" into a git repository "%s", took %.2f seconds' % (self.datadir, self.outputdir, time_took))
+		log.info('Finished converting dokuwiki "%s" into a git repository "%s", took %.2f seconds' % (self.dwdir, self.outputdir, time_took))
 
-	def set_datadir(self, datadir):
-		if not os.path.isfile(os.path.join(datadir, '_dummy')):
-			raise RuntimeError('Directory "%s" does not look like a dokuwiki datadir' % datadir)
-		self.datadir = os.path.abspath(datadir)
-		self.metadir = os.path.join(self.datadir, 'meta')
-		self.atticdir = os.path.join(self.datadir, 'attic')
-		self.mediadir = os.path.join(self.datadir, 'media')
-		log.info('Using datadir: %s' % self.datadir)
+	def set_dwdata(self, dwdir):
+		self.dwdir = dwdir
+		try:
+			self.dwdata = json.loads(subprocess.check_output('php dokuwiki.php %s' % self.shell_quote(dwdir), shell=True))
+		except:
+			log.error('Unable to read php scripts from the specified dokuwiki directory')
+			sys.exit(1)
+		log.info('Using Dokuwiki: %s' % self.dwdir)
 
 	def shell_quote(self, str):
 		return "'" + str.replace("'", "'\\''") + "'"
