@@ -92,6 +92,10 @@ class Converter:
 			if not os.path.exists(filename):
 				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.bz2' % timestamp)
 			if not os.path.exists(filename):
+				filename = os.path.join(self.dwdata['conf']['datadir'].encode('UTF-8'), pagepath + '.txt')
+				if not (os.path.exists(filename) and str(int(os.path.getmtime(filename))) == timestamp):
+					filename = ""
+			if not os.path.exists(filename):
 				log.warn('Attic of page "%s" with timestamp "%s" does not exist, despite being in changelog, skipping' % (pagepath, timestamp))
 				continue
 			self.add_page_commit(filename, timestamp, c[1], c[2], pagepath, c[4], c[5], c[6])
@@ -150,6 +154,39 @@ class Converter:
 					pages += 1
 		log.info('%d changelog entries for %d pages found' % (len(self.changelog), pages))
 
+	def read_pages(self):
+
+		def get_pagepath_and_timestamp(filename):
+			pagepath = os.path.relpath(filename, self.dwdata['conf']['datadir'].encode('UTF-8'))
+			return pagepath.rsplit('.', 1)[0], str(int(os.path.getmtime(filename)))
+
+		def last_changelog_entry(pagepath, timestamp):
+			lasttimestamp = None
+			lasttype = None
+			pagepath = pagepath.replace('/', ':')
+			if pagepath in self.pagechanges:
+				c = self.pagechanges[pagepath][-1]
+				lasttimestamp, lasttype = c[0], c[2]
+			return lasttimestamp, lasttype
+
+		log.info('Reading pages for possible external edits')
+
+		# Check the pages directory for external edits not yet recorded in the meta
+		pages = 0
+		for path, dirs, files in os.walk(self.dwdata['conf']['datadir'].encode('UTF-8')):
+			for f in files:
+				if fnmatch.fnmatch(f, '*.txt'):
+					filename = os.path.join(path, f)
+					pagepath, timestamp = get_pagepath_and_timestamp(filename)
+					lasttimestamp, lasttype = last_changelog_entry(pagepath, timestamp)
+					if lasttimestamp is None or lasttimestamp < timestamp:
+						type = 'C' if lasttype is None or lasttype == 'D' else 'E'
+						changeparts = [timestamp, '127.0.0.1', type, pagepath, '', self.dwdata['lang']['external_edit'].encode('UTF-8'), '']
+						log.debug(changeparts)
+						self.changelog.append(changeparts)
+						pages += 1
+		log.info('%d newly edited pages found' % (pages))
+
 	def read_user_data(self):
 		log.info('Reading users.auth.php')
 		users_file = self.dwdata['config_cascade']['plainauth.users']['default'].encode('UTF-8')
@@ -168,6 +205,7 @@ class Converter:
 			description='''dokuwiki2git converts dokuwiki data directory into a git repository containing the wiki pages, with proper history. Thus, migration to git-backed wiki engines (eg. gollum) becomes easier.''')
 		parser.add_argument('-o', '--output', dest='outputdir', default = 'gitdir', metavar='<output dir>', help='directory to create the git repo (default: %(default)s)')
 		parser.add_argument('-u', '--users', dest='import_user', action='store_true', help='record the author of every change with real user name and email from dokuwiki database, instead of id@dokuwiki-domain')
+		parser.add_argument('-e', '--external-edit', action='store_true', dest='external_edit', help='import external edits not recorded in meta .changes')
 		parser.add_argument('-q', '--quiet', action='store_const', dest='verbose', const=0, default=1, help='show only warnings and errors')
 		parser.add_argument('-v', '--verbose', action='store_const', dest='verbose', const=2, default=1, help='show debug messages')
 		parser.add_argument('dwdir', metavar='<dokuwiki dir>', help='path to dokuwiki')
@@ -198,6 +236,8 @@ class Converter:
 		self.commands.append('git init --quiet')
 		# go through data/meta, collecting the history
 		self.read_meta()
+		if args.external_edit:
+			self.read_pages()
 		# sort the log history
 		self.changelog.sort()
 		# go through data/attic, importing pages referenced by .changes in meta
