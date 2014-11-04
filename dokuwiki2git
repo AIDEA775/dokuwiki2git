@@ -27,14 +27,14 @@ class Converter:
 		self.metadir = None
 		self.changelog = [] # (timestamp, ip, changetype, pagename, author, comment)
 		self.commands = [] # commands to run to create the git repository
-		self.gitdir = 'gitdir'
+		self.outputdir = 'gitdir'
 		self.users = {}
 
 	def create_git_repository(self):
 		log.info('Creating git repository')
 		origdir = os.getcwd()
-		os.mkdir(self.gitdir)
-		os.chdir(self.gitdir)
+		os.mkdir(self.outputdir)
+		os.chdir(self.outputdir)
 		# run all commands
 		for c in self.commands:
 			log.debug('CMD: %s' % c)
@@ -176,7 +176,7 @@ class Converter:
 		if options.verbose:
 			level = (logging.WARN, logging.INFO, logging.DEBUG)[options.verbose]
 		log.setLevel(level)
-		self.gitdir = options.outputdir
+		self.outputdir = options.outputdir
 
 		time_start = time.time()
 		if len(args) == 0:
@@ -189,7 +189,7 @@ class Converter:
 		self.create_git_repository()
 		time_end = time.time()
 		time_took = time_end - time_start
-		log.info('Finished converting dokuwiki data dir "%s" into a git repository "%s", took %.2f seconds' % (self.datadir, self.gitdir, time_took))
+		log.info('Finished converting dokuwiki data dir "%s" into a git repository "%s", took %.2f seconds' % (self.datadir, self.outputdir, time_took))
 
 	def set_datadir(self, datadir):
 		if not os.path.isfile(os.path.join(datadir, '_dummy')):
