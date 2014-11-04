@@ -72,7 +72,7 @@ class Converter:
 
 			# depending on type of change, either add or remove
 			pagepath, timestamp = self.get_pagepath_and_timestamp(filename)
-			pagefile = pagepath + '.txt'
+			pagefile = os.path.join('pages', pagepath + '.txt')
 			message = pagepath + ': ' + c[5]
 			user = c[4]
 			email = 'dokuwiki@%s' % (c[1])
