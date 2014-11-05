@@ -35,36 +35,6 @@ class Converter:
 				raise RuntimeError('Command "%s" failed' % c)
 		os.chdir(origdir)
 
-	def add_page_commit(self, source_file, timestamp, ip, type, pagepath, user, message, extra):
-		# depending on type of change, either add or remove
-		target_file = os.path.join('pages', pagepath + '.txt')
-		message = pagepath + ': ' + message
-		email = ''
-		if len(user) == 0:
-			user = ip
-		elif user in self.users:
-			email = self.users[user]['email']
-			user = self.users[user]['name']
-		else:
-			user = '%s@%s' % (user, self.args.domain)
-		author = '%s <%s>' % (user, email)
-		cmds = []
-		if type in ('C', 'E', 'e', 'R'): # create, edit, minor edit, restore
-			dirname = os.path.dirname(target_file)
-			if len(dirname) > 0:
-				cmds.append('mkdir -p %s' % self.shell_quote(dirname))
-			if fnmatch.fnmatch(source_file, '*.txt'):
-				cmds.append('cp -a %s %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
-			elif fnmatch.fnmatch(source_file, '*.txt.gz'):
-				cmds.append('gunzip -c %s > %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
-			elif fnmatch.fnmatch(source_file, '*.txt.bz2'):
-				cmds.append('bunzip2 -c %s > %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
-			cmds.append('git add %s' % self.shell_quote(target_file))
-		elif type == 'D': # delete
-			cmds.append('git rm --quiet %s' % self.shell_quote(target_file))
-		cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
-		self.commands.extend(cmds)
-
 	def read_attic(self):
 
 		def get_source_file(subpath, timestamp):
@@ -82,13 +52,45 @@ class Converter:
 			log.warn('Attic of page "%s" with timestamp "%s" does not exist, despite being in changelog, skipping' % (subpath, timestamp))
 			return None
 
+		def add_commit(timestamp, ip, type, id, user, message, extra):
+			subpath = id.replace(':', '/')
+			source_file = get_source_file(subpath, timestamp)
+			if source_file is None: return
+			# author (user <email>)
+			email = ''
+			if len(user) == 0:
+				user = ip
+			elif user in self.users:
+				email = self.users[user]['email']
+				user = self.users[user]['name']
+			else:
+				user = '%s@%s' % (user, self.args.domain)
+			author = '%s <%s>' % (user, email)
+			# message
+			message = '%s: %s' % (subpath, message)
+			# target_file
+			target_file = os.path.join('pages', '%s.txt' % subpath)
+			# build commands
+			cmds = []
+			if type in ('C', 'E', 'e', 'R'): # create, edit, minor edit, restore
+				dirname = os.path.dirname(target_file)
+				if len(dirname) > 0:
+					cmds.append('mkdir -p %s' % self.shell_quote(dirname))
+				if fnmatch.fnmatch(source_file, '*.txt'):
+					cmds.append('cp -a %s %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
+				elif fnmatch.fnmatch(source_file, '*.txt.gz'):
+					cmds.append('gunzip -c %s > %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
+				elif fnmatch.fnmatch(source_file, '*.txt.bz2'):
+					cmds.append('bunzip2 -c %s > %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
+				cmds.append('git add %s' % self.shell_quote(target_file))
+			elif type == 'D': # delete
+				cmds.append('git rm --quiet %s' % self.shell_quote(target_file))
+			cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
+			self.commands.extend(cmds)
+
 		log.info('Reading attic')
-		for c in self.changelog:
-			timestamp = c[0]
-			pagepath = c[3].replace(':', '/')
-			filename = get_source_file(pagepath, timestamp)
-			if filename is None: continue
-			self.add_page_commit(filename, timestamp, c[1], c[2], pagepath, c[4], c[5], c[6])
+		for (timestamp, ip, type, id, user, message, extra) in self.changelog:
+			add_commit(timestamp, ip, type, id, user, message, extra)
 
 	def check_attic(self):
 
