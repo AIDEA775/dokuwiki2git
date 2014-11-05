@@ -164,36 +164,29 @@ class Converter:
 
 	def read_pages(self):
 
-		def get_pagepath_and_timestamp(filename):
-			pagepath = os.path.relpath(filename, self.dwdata['conf']['datadir'].encode('UTF-8'))
-			return pagepath.rsplit('.', 1)[0], str(int(os.path.getmtime(filename)))
-
-		def last_changelog_entry(pagepath, timestamp):
-			lasttimestamp = None
-			lasttype = None
-			pagepath = pagepath.replace('/', ':')
-			if pagepath in self.pagechanges:
-				c = self.pagechanges[pagepath][-1]
-				lasttimestamp, lasttype = c[0], c[2]
-			return lasttimestamp, lasttype
+		def last_changelog_entry(id):
+			if id in self.pagechanges:
+				return self.pagechanges[id][-1]
+			return None
 
 		log.info('Reading pages for possible external edits')
-
-		# Check the pages directory for external edits not yet recorded in the meta
-		pages = 0
-		for path, dirs, files in os.walk(self.dwdata['conf']['datadir'].encode('UTF-8')):
+		root = self.dwdata['conf']['datadir'].encode('UTF-8')
+		items = 0
+		for path, dirs, files in os.walk(root):
 			for f in files:
 				if fnmatch.fnmatch(f, '*.txt'):
 					filename = os.path.join(path, f)
-					pagepath, timestamp = get_pagepath_and_timestamp(filename)
-					lasttimestamp, lasttype = last_changelog_entry(pagepath, timestamp)
-					if lasttimestamp is None or lasttimestamp < timestamp:
-						type = 'C' if lasttype is None or lasttype == 'D' else 'E'
-						changeparts = [timestamp, '127.0.0.1', type, pagepath, '', self.dwdata['lang']['external_edit'].encode('UTF-8'), '']
+					id = os.path.splitext(os.path.relpath(filename, root))[0].replace('/', ':')
+					timestamp = str(int(os.path.getmtime(filename)))
+					c = last_changelog_entry(id) # [date, ip, type, id, user, sum, extra]
+					# if the page is not in meta or the page has newer change, create a log as an external edit
+					if c is None or c[0] < timestamp:
+						type = 'C' if c is None or c[2] == 'D' else 'E'
+						changeparts = [timestamp, '127.0.0.1', type, id, '', self.dwdata['lang']['external_edit'].encode('UTF-8'), '']
 						log.debug(changeparts)
 						self.changelog.append(changeparts)
-						pages += 1
-		log.info('%d newly edited pages found' % (pages))
+						items += 1
+		log.info('%d newly edited pages found' % (items))
 
 	def read_user_data(self):
 		log.info('Reading users.auth.php')
