@@ -51,7 +51,7 @@ class Converter:
 				filename = os.path.join(self.dwdata['conf']['datadir'].encode('UTF-8'), '%s.txt' % subpath)
 				if os.path.exists(filename) and str(int(os.path.getmtime(filename))) == timestamp: return filename
 				# not exist, error out
-				log.warn('Attic of page "%s" with timestamp "%s" does not exist, despite being in changelog, skipping' % (subpath, timestamp))
+				log.warn('Attic file of page "%s" with timestamp "%s" is missing' % (subpath, timestamp))
 				return None
 			elif itemtype == 'media':
 				parts = os.path.splitext(subpath)
@@ -62,7 +62,7 @@ class Converter:
 				filename = os.path.join(self.dwdata['conf']['mediadir'].encode('UTF-8'), '%s%s' % (parts[0], parts[1]))
 				if os.path.exists(filename) and str(int(os.path.getmtime(filename))) == timestamp: return filename
 				# not exist, error out
-				log.warn('Attic of media "%s" with timestamp "%s" does not exist, despite being in changelog, skipping' % (subpath, timestamp))
+				log.warn('Attic file of media "%s" with timestamp "%s" is missing' % (subpath, timestamp))
 				return None
 
 		def add_commit(c, itempath, itemtype):
@@ -76,7 +76,6 @@ class Converter:
 			timestamp, ip, type, id, user, message, extra = c
 			subpath = id.replace(':', '/')
 			source_file = get_source_file(itemtype, subpath, timestamp)
-			if source_file is None: return
 			# init notes
 			notes = [] # [ [key1, value2], [key2, value2], ... ]
 			notes.append(['log', c])
@@ -106,15 +105,20 @@ class Converter:
 				dirname = os.path.dirname(target_file)
 				if len(dirname) > 0:
 					cmds.append('mkdir -p %s' % self.shell_quote(dirname))
-				if itemtype == 'page':
-					if fnmatch.fnmatch(source_file, '*.txt'):
+				if source_file is not None:
+					if itemtype == 'page':
+						if fnmatch.fnmatch(source_file, '*.txt'):
+							cmds.append('cp -a %s %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
+						elif fnmatch.fnmatch(source_file, '*.txt.gz'):
+							cmds.append('gunzip -c %s > %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
+						elif fnmatch.fnmatch(source_file, '*.txt.bz2'):
+							cmds.append('bunzip2 -c %s > %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
+					elif itemtype == 'media':
 						cmds.append('cp -a %s %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
-					elif fnmatch.fnmatch(source_file, '*.txt.gz'):
-						cmds.append('gunzip -c %s > %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
-					elif fnmatch.fnmatch(source_file, '*.txt.bz2'):
-						cmds.append('bunzip2 -c %s > %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
-				elif itemtype == 'media':
-					cmds.append('cp -a %s %s' % (self.shell_quote(source_file), self.shell_quote(target_file)))
+				else:
+					# flush a unique dummy content reather than remove the file, so that "git log -- file" can trace easily
+					cmds.append('echo "content missing after commit: $(git rev-parse --verify -q HEAD || echo "0000000000000000000000000000000000000000")" > %s' % (self.shell_quote(target_file)))
+					notes.append(['info', 'attic missing'])
 				cmds.append('git add %s' % self.shell_quote(target_file))
 			elif type == 'D': # delete
 				cmds.append('git rm --quiet %s' % self.shell_quote(target_file))
