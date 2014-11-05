@@ -66,23 +66,7 @@ class Converter:
 		self.commands.extend(cmds)
 
 	def read_attic(self):
-
-		def get_pagepath_and_timestamp(filename):
-			filename = os.path.relpath(filename, self.dwdata['conf']['olddir'].encode('UTF-8'))
-			parts = filename.rsplit('.', 2 if fnmatch.fnmatch(filename, '*.txt') else 3)
-			return parts[0], parts[1] # pagepath, timestamp
-
-		def check_changelog_entry(pagepath, timestamp):
-			pagepath = pagepath.replace('/', ':')
-			if pagepath in self.pagechanges:
-				for c in self.pagechanges[pagepath]:
-					if timestamp == c[0] and pagepath == c[3]:
-						return
-			log.warn('Attic contains "%s" timestamp %s, but is not referenced by changelog, skipping. Please report this!' % (pagepath, timestamp))
-
 		log.info('Reading attic')
-
-		# Check that all referenced pages exist in attic
 		for c in self.changelog:
 			timestamp = c[0]
 			pagepath = c[3].replace(':', '/')
@@ -100,13 +84,28 @@ class Converter:
 				continue
 			self.add_page_commit(filename, timestamp, c[1], c[2], pagepath, c[4], c[5], c[6])
 
-		# check that all pages in attic have a matching changelog entry
-		for path, dirs, files in os.walk(self.dwdata['conf']['olddir'].encode('UTF-8')):
+	def check_attic(self):
+
+		def check_page_entry(subpath, timestamp):
+			id = subpath.replace('/', ':')
+			if id in self.pagechanges:
+				for c in self.pagechanges[id]:
+					if timestamp == c[0] and id == c[3]:
+						return
+			log.warn('Attic contains "%s" timestamp %s, but is not referenced by changelog, skipping. Please report this!' % (id, timestamp))
+
+		log.info('Checking attic')
+		root = self.dwdata['conf']['olddir'].encode('UTF-8')
+		for path, dirs, files in os.walk(root):
 			for f in files:
 				if fnmatch.fnmatch(f, '*.txt') or fnmatch.fnmatch(f, '*.txt.gz') or fnmatch.fnmatch(f, '*.txt.bz2'):
-					filename = os.path.join(path, f)
-					pagepath, timestamp = get_pagepath_and_timestamp(filename)
-					check_changelog_entry(pagepath, timestamp)
+					fullpath = os.path.join(path, f)
+					subpath = os.path.relpath(fullpath, root)
+					if fnmatch.fnmatch(fullpath, '*.txt'):
+						subpath, timestamp, txt = subpath.rsplit('.', 2)
+					else:
+						subpath, timestamp, txt, zip = subpath.rsplit('.', 3)
+					check_page_entry(subpath, timestamp)
 
 	def read_media(self):
 		log.info('Reading media')
@@ -246,6 +245,8 @@ class Converter:
 		self.commands.append('git init --quiet')
 		# for each change history collected, find the corresponding history data file and build the import commands
 		self.read_attic()
+		# check the attic/ for data files not recorded in the change history
+		self.check_attic()
 		# import media additionally
 		self.read_media()
 		# add a note for importing
