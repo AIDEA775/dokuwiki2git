@@ -132,6 +132,8 @@ class Converter:
 			log.debug('Reading meta for page "%s"' % pagename)
 			with open(fullpath, 'rb') as f:
 				for line in f:
+					line = line.rstrip('\n')
+					if len(line) == 0: continue
 					changeparts = line.split('\t')
 					log.debug(changeparts)
 					assert(len(changeparts) == 7)
