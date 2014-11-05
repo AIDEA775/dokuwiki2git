@@ -18,8 +18,8 @@ class Converter:
 		self.args = None # arguments from the command line
 		self.dwdata = {} # setting data loaded from the dokuwiki
 		self.users = {} # user data loaded from the dokuwiki
-		self.changelog = [] # (timestamp, ip, changetype, pagename, author, comment)
-		self.pagechanges = {} # { pagepath: (timestamp, ip, changetype, pagename, author, comment) }
+		self.changelog = [] # [date, ip, type, id, user, sum, extra]
+		self.pagechanges = {} # { pagesubpath: [date, ip, type, id, user, sum, extra] }
 		self.commands = [] # shell commands to run
 
 	def create_git_repository(self):
@@ -234,15 +234,17 @@ class Converter:
 		if self.args.import_user and self.dwdata['conf']['authtype'] == 'authplain':
 			self.read_user_data()
 
-		# main process
-		self.commands.append('git init --quiet')
-		# go through data/meta, collecting the history
+		# collect history
+		# go through meta/ *.changes to collect the change history
+		# if "detect external edit" is set, also go through pages/ for latest version not recorded
 		self.read_meta()
 		if args.external_edit:
 			self.read_pages()
-		# sort the log history
 		self.changelog.sort()
-		# go through data/attic, importing pages referenced by .changes in meta
+		
+		# build commands
+		self.commands.append('git init --quiet')
+		# for each change history collected, find the corresponding history data file and build the import commands
 		self.read_attic()
 		# import media additionally
 		self.read_media()
