@@ -132,11 +132,10 @@ class Converter:
 
 	def read_meta(self):
 
-		def read_meta_page(pagepath, fullpath):
-			if fnmatch.fnmatch(pagepath, '_*'):
-				return
-			pagename = pagepath.replace('/', ':')
-			log.debug('Reading meta for page "%s"' % pagename)
+		def read_meta_file(subpath, fullpath):
+			if fnmatch.fnmatch(subpath, '_*'): return
+			id = subpath.replace('/', ':')
+			log.debug('Reading meta for page "%s"' % id)
 			with open(fullpath, 'rb') as f:
 				for line in f:
 					line = line.rstrip('\n')
@@ -144,24 +143,24 @@ class Converter:
 					changeparts = line.split('\t')
 					log.debug(changeparts)
 					assert(len(changeparts) == 7)
-					assert(changeparts[3] == pagename)
+					assert(changeparts[3] == id)
 					assert(changeparts[2] in ('C', 'D', 'E', 'e', 'R')) # create, delete, edit, minor edit, restore
 					self.changelog.append(changeparts)
-					if pagename in self.pagechanges:
-						self.pagechanges[pagename].append(changeparts)
-					else:
-						self.pagechanges[pagename] = [changeparts]
+					if id in self.pagechanges: self.pagechanges[id].append(changeparts)
+					else: self.pagechanges[id] = [changeparts]
 
 		log.info('Reading meta')
-		pages = 0
-		for path, dirs, files in os.walk(self.dwdata['conf']['metadir'].encode('UTF-8')):
+		root = self.dwdata['conf']['metadir'].encode('UTF-8')
+		items = 0
+		for path, dirs, files in os.walk(root):
 			for f in files:
 				if fnmatch.fnmatch(f, '*.changes'):
-					relpath = os.path.relpath(os.path.join(path, f), self.dwdata['conf']['metadir'].encode('UTF-8'))
-					pagepath = relpath.rsplit('.', 1)[0]
-					read_meta_page(pagepath, os.path.join(path, f))
-					pages += 1
-		log.info('%d changelog entries for %d pages found' % (len(self.changelog), pages))
+					fullpath = os.path.join(path, f)
+					subpath = os.path.splitext(os.path.relpath(fullpath, root))[0]
+					read_meta_file(subpath, fullpath)
+					items += 1
+		logs = len(self.changelog)
+		log.info('%d changelog entries for %d pages found' % (logs, items))
 
 	def read_pages(self):
 
