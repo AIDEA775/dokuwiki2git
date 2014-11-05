@@ -16,7 +16,6 @@ log = logging.getLogger()
 class Converter:
 	def __init__(self):
 		self.args = None # arguments from the command line
-		self.dwdir = None # the main dokuwiki directory
 		self.dwdata = {} # setting data loaded from the dokuwiki
 		self.users = {} # user data loaded from the dokuwiki
 		self.changelog = [] # (timestamp, ip, changetype, pagename, author, comment)
@@ -43,7 +42,7 @@ class Converter:
 		email = ''
 		if len(user) == 0:
 			user = ip
-		elif self.args.import_user and user in self.users:
+		elif user in self.users:
 			email = self.users[user]['email']
 			user = self.users[user]['name']
 		else:
@@ -104,20 +103,6 @@ class Converter:
 					filename = os.path.join(path, f)
 					pagepath, timestamp = get_pagepath_and_timestamp(filename)
 					check_changelog_entry(pagepath, timestamp)
-
-	def read_data(self):
-		self.commands.append('git init --quiet')
-		# find user Real Name and email
-		if self.dwdata['conf']['authtype'] == 'authplain':
-			self.read_user_data()
-		# go through data/meta
-		self.read_meta()
-		# sort history
-		self.changelog.sort()
-		# go through data/attic, importing pages referenced by .changes in meta
-		self.read_attic()
-		self.read_media()
-		self.commands.append('git commit --quiet --allow-empty --author="dokuwiki2git <dokuwiki2git@hoxu.github.com>" -m "Dokuwiki data imported by dokuwiki2git"')
 
 	def read_media(self):
 		log.info('Reading media')
@@ -188,26 +173,48 @@ class Converter:
 		parser.add_argument('dwdir', metavar='<dokuwiki dir>', help='path to dokuwiki')
 		parser.add_argument('domain', metavar='<dokuwiki domain>', nargs='?', default='dokuwiki.localhost', help='domain name (or IP) of the dokuwiki site, for better authorship tracing')
 
+		# parse arguments
 		self.args = args = parser.parse_args(params)
 		log.setLevel((logging.WARN, logging.INFO, logging.DEBUG)[args.verbose])
 
 		time_start = time.time()
-		self.set_dwdata()
-		self.read_data()
-		log.info('%d commands queued to be executed' % len(self.commands))
-		self.create_git_repository()
-		time_end = time.time()
-		time_took = time_end - time_start
-		log.info('Finished converting dokuwiki "%s" into a git repository "%s", took %.2f seconds' % (self.dwdir, self.args.outputdir, time_took))
+		log.info('Import data from dokuwiki "%s" at domain "%s"' % (args.dwdir, args.domain))
 
-	def set_dwdata(self):
-		self.dwdir = self.args.dwdir
+		# check and load dokuwiki data
 		try:
-			self.dwdata = json.loads(subprocess.check_output('php dokuwiki.php %s' % self.shell_quote(self.dwdir), shell=True))
+			self.dwdata = json.loads(subprocess.check_output('php dokuwiki.php %s' % self.shell_quote(args.dwdir), shell=True))
 		except:
 			log.error('Unable to read php scripts from the specified dokuwiki directory')
 			sys.exit(1)
-		log.info('Import data from dokuwiki "%s" at domain "%s"' % (self.dwdir, self.args.domain))
+		# check output directory
+		if os.path.exists(args.outputdir):
+			log.error('There is already something at the output directory path "%s"' % args.outputdir)
+			sys.exit(1)
+		# read user Real Name and email from dokuwiki, if requested and available
+		if self.args.import_user and self.dwdata['conf']['authtype'] == 'authplain':
+			self.read_user_data()
+
+		# main process
+		self.commands.append('git init --quiet')
+		# go through data/meta, collecting the history
+		self.read_meta()
+		# sort the log history
+		self.changelog.sort()
+		# go through data/attic, importing pages referenced by .changes in meta
+		self.read_attic()
+		# import media additionally
+		self.read_media()
+		# add a note for importing
+		self.commands.append('git commit --quiet --allow-empty --author="dokuwiki2git <dokuwiki2git@hoxu.github.com>" -m "Dokuwiki data imported by dokuwiki2git"')
+
+		# start running the shell commands
+		log.info('%d commands queued to be executed' % len(self.commands))
+		self.create_git_repository()
+
+		# success, calculate and show the time spent
+		time_end = time.time()
+		time_took = time_end - time_start
+		log.info('Finished converting dokuwiki "%s" into a git repository "%s", took %.2f seconds' % (args.dwdir, self.args.outputdir, time_took))
 
 	def shell_quote(self, str):
 		return "'" + str.replace("'", "'\\''") + "'"
