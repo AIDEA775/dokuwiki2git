@@ -66,22 +66,28 @@ class Converter:
 		self.commands.extend(cmds)
 
 	def read_attic(self):
+
+		def get_source_file(subpath, timestamp):
+			# try attic/ folder for each compression types
+			filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), '%s.%s.txt' % (subpath, timestamp))
+			if os.path.exists(filename): return filename
+			filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), '%s.%s.txt.gz' % (subpath, timestamp))
+			if os.path.exists(filename): return filename
+			filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), '%s.%s.txt.bz2' % (subpath, timestamp))
+			if os.path.exists(filename): return filename
+			# try pages/ folder
+			filename = os.path.join(self.dwdata['conf']['datadir'].encode('UTF-8'), '%s.txt' % subpath)
+			if os.path.exists(filename) and str(int(os.path.getmtime(filename))) == timestamp: return filename
+			# not exist, error out
+			log.warn('Attic of page "%s" with timestamp "%s" does not exist, despite being in changelog, skipping' % (subpath, timestamp))
+			return None
+
 		log.info('Reading attic')
 		for c in self.changelog:
 			timestamp = c[0]
 			pagepath = c[3].replace(':', '/')
-			filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt' % timestamp)
-			if not os.path.exists(filename):
-				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.gz' % timestamp)
-			if not os.path.exists(filename):
-				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.bz2' % timestamp)
-			if not os.path.exists(filename):
-				filename = os.path.join(self.dwdata['conf']['datadir'].encode('UTF-8'), pagepath + '.txt')
-				if not (os.path.exists(filename) and str(int(os.path.getmtime(filename))) == timestamp):
-					filename = ""
-			if not os.path.exists(filename):
-				log.warn('Attic of page "%s" with timestamp "%s" does not exist, despite being in changelog, skipping' % (pagepath, timestamp))
-				continue
+			filename = get_source_file(pagepath, timestamp)
+			if filename is None: continue
 			self.add_page_commit(filename, timestamp, c[1], c[2], pagepath, c[4], c[5], c[6])
 
 	def check_attic(self):
