@@ -40,12 +40,14 @@ class Converter:
 		# depending on type of change, either add or remove
 		target_file = os.path.join('pages', pagepath + '.txt')
 		message = pagepath + ': ' + message
-		email = 'dokuwiki@%s' % (ip)
+		email = ''
 		if len(user) == 0:
-			user = 'dokuwiki2git'
-		elif user in self.users:
+			user = ip
+		elif self.args.import_user and user in self.users:
 			email = self.users[user]['email']
 			user = self.users[user]['name']
+		else:
+			user = '%s@%s' % (user, self.args.domain)
 		author = '%s <%s>' % (user, email)
 		cmds = []
 		if type in ('C', 'E', 'e', 'R'): # create, edit, minor edit, restore
@@ -180,15 +182,17 @@ class Converter:
 			prog='dokuwiki2git',
 			description='''dokuwiki2git converts dokuwiki data directory into a git repository containing the wiki pages, with proper history. Thus, migration to git-backed wiki engines (eg. gollum) becomes easier.''')
 		parser.add_argument('-o', '--output', dest='outputdir', default = 'gitdir', metavar='<output dir>', help='directory to create the git repo (default: %(default)s)')
+		parser.add_argument('-u', '--users', dest='import_user', action='store_true', help='record the author of every change with real user name and email from dokuwiki database, instead of id@dokuwiki-domain')
 		parser.add_argument('-q', '--quiet', action='store_const', dest='verbose', const=0, default=1, help='show only warnings and errors')
 		parser.add_argument('-v', '--verbose', action='store_const', dest='verbose', const=2, default=1, help='show debug messages')
 		parser.add_argument('dwdir', metavar='<dokuwiki dir>', help='path to dokuwiki')
+		parser.add_argument('domain', metavar='<dokuwiki domain>', nargs='?', default='dokuwiki.localhost', help='domain name (or IP) of the dokuwiki site, for better authorship tracing')
 
 		self.args = args = parser.parse_args(params)
 		log.setLevel((logging.WARN, logging.INFO, logging.DEBUG)[args.verbose])
 
 		time_start = time.time()
-		self.set_dwdata(args.dwdir)
+		self.set_dwdata()
 		self.read_data()
 		log.info('%d commands queued to be executed' % len(self.commands))
 		self.create_git_repository()
@@ -196,14 +200,14 @@ class Converter:
 		time_took = time_end - time_start
 		log.info('Finished converting dokuwiki "%s" into a git repository "%s", took %.2f seconds' % (self.dwdir, self.args.outputdir, time_took))
 
-	def set_dwdata(self, dwdir):
-		self.dwdir = dwdir
+	def set_dwdata(self):
+		self.dwdir = self.args.dwdir
 		try:
-			self.dwdata = json.loads(subprocess.check_output('php dokuwiki.php %s' % self.shell_quote(dwdir), shell=True))
+			self.dwdata = json.loads(subprocess.check_output('php dokuwiki.php %s' % self.shell_quote(self.dwdir), shell=True))
 		except:
 			log.error('Unable to read php scripts from the specified dokuwiki directory')
 			sys.exit(1)
-		log.info('Using Dokuwiki: %s' % self.dwdir)
+		log.info('Import data from dokuwiki "%s" at domain "%s"' % (self.dwdir, self.args.domain))
 
 	def shell_quote(self, str):
 		return "'" + str.replace("'", "'\\''") + "'"
