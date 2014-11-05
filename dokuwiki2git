@@ -1,39 +1,32 @@
 #!/usr/bin/env python
 # Copyright (c) 2011-2014 Heikki Hokkanen <hoxu at users.sf.net>
 # License: AGPLv3
+import argparse
 import fnmatch
 import logging
 import json
-import optparse
 import os
 import subprocess
 import sys
 import time
-
-USAGE = """
-dokuwiki2git converts dokuwiki data directory into a git repository containing
-the wiki pages, with proper history. Thus, migration to git-backed wiki engines
-(eg. gollum) becomes easier.
-
-$ dokuwiki2git [options] /path/to/dokuwiki"""
 
 logging.basicConfig(level = logging.DEBUG, format = '%(levelname)s - %(message)s')
 log = logging.getLogger()
 
 class Converter:
 	def __init__(self):
-		self.dwdir = None
-		self.dwdata = {} # data loaded from dokuwiki
+		self.args = None # arguments from the command line
+		self.dwdir = None # the main dokuwiki directory
+		self.dwdata = {} # setting data loaded from the dokuwiki
+		self.users = {} # user data loaded from the dokuwiki
 		self.changelog = [] # (timestamp, ip, changetype, pagename, author, comment)
-		self.commands = [] # commands to run to create the git repository
-		self.outputdir = 'gitdir'
-		self.users = {}
+		self.commands = [] # shell commands to run
 
 	def create_git_repository(self):
 		log.info('Creating git repository')
 		origdir = os.getcwd()
-		os.mkdir(self.outputdir)
-		os.chdir(self.outputdir)
+		os.mkdir(self.args.outputdir)
+		os.chdir(self.args.outputdir)
 		# run all commands
 		for c in self.commands:
 			log.debug('CMD: %s' % c)
@@ -175,30 +168,25 @@ class Converter:
 		log.info('Read %d users' % len(self.users))
 
 	def run(self, params):
-		parser = optparse.OptionParser(usage = USAGE)
-		parser.add_option('-o', '--output', dest='outputdir', help='Create git directory at outputdir. Default is "gitdir"', default = 'gitdir')
-		parser.add_option('-q', '--quiet', action='store_const', const=0, dest='verbose', help='Show only warnings and errors')
-		parser.add_option('-v', '--verbose', action='store_const', const=2, dest='verbose', help='Show debug messages', default=1)
-		(options, args) = parser.parse_args(params)
-		level = logging.WARN
-		if options.verbose:
-			level = (logging.WARN, logging.INFO, logging.DEBUG)[options.verbose]
-		log.setLevel(level)
-		self.outputdir = options.outputdir
+		parser = argparse.ArgumentParser(
+			prog='dokuwiki2git',
+			description='''dokuwiki2git converts dokuwiki data directory into a git repository containing the wiki pages, with proper history. Thus, migration to git-backed wiki engines (eg. gollum) becomes easier.''')
+		parser.add_argument('-o', '--output', dest='outputdir', default = 'gitdir', metavar='<output dir>', help='directory to create the git repo (default: %(default)s)')
+		parser.add_argument('-q', '--quiet', action='store_const', dest='verbose', const=0, default=1, help='show only warnings and errors')
+		parser.add_argument('-v', '--verbose', action='store_const', dest='verbose', const=2, default=1, help='show debug messages')
+		parser.add_argument('dwdir', metavar='<dokuwiki dir>', help='path to dokuwiki')
+
+		self.args = args = parser.parse_args(params)
+		log.setLevel((logging.WARN, logging.INFO, logging.DEBUG)[args.verbose])
 
 		time_start = time.time()
-		if len(args) == 0:
-			parser.print_help()
-			log.error('Dokuwiki directory is a required argument')
-			sys.exit(1)
-
-		self.set_dwdata(args[0])
+		self.set_dwdata(args.dwdir)
 		self.read_data()
 		log.info('%d commands queued to be executed' % len(self.commands))
 		self.create_git_repository()
 		time_end = time.time()
 		time_took = time_end - time_start
-		log.info('Finished converting dokuwiki "%s" into a git repository "%s", took %.2f seconds' % (self.dwdir, self.outputdir, time_took))
+		log.info('Finished converting dokuwiki "%s" into a git repository "%s", took %.2f seconds' % (self.dwdir, self.args.outputdir, time_took))
 
 	def set_dwdata(self, dwdir):
 		self.dwdir = dwdir
