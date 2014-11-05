@@ -129,17 +129,13 @@ class Converter:
 	def check_attic(self):
 
 		def check_changelog_entry(itemtype, subpath, timestamp):
-			if itemtype == 'page':
-				what = 'Attic'
-			elif itemtype == 'media':
-				what = 'Media attic'
 			id = subpath.replace('/', ':')
 			dict = self.changes[itemtype]
 			if id in dict:
 				for c in dict[id]:
 					if timestamp == c[0] and id == c[3]:
 						return
-			log.warn('%s contains "%s" timestamp %s, but is not referenced by changelog, skipping. Please report this!' % (what, id, timestamp))
+			log.warn('Attic file of %s "%s" with timestamp %s is not referenced by the changelog' % (itemtype, id, timestamp))
 
 		log.info('Checking attic')
 		root = self.dwdata['conf']['olddir'].encode('UTF-8')
