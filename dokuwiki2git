@@ -126,7 +126,7 @@ class Converter:
 					notes.append(['info', 'attic missing'])
 				cmds.append('git add %s' % self.shell_quote(target_file))
 			elif type == 'D': # delete
-				cmds.append('git rm --quiet %s' % self.shell_quote(target_file))
+				cmds.append('git rm --quiet --ignore-unmatch %s' % self.shell_quote(target_file))
 			cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
 			cmds.append('git notes --ref=%s add -m %s' % (self.shell_quote(self.args.notes_ref), self.shell_quote(pack_notes(notes))))
 			self.commands.extend(cmds)
