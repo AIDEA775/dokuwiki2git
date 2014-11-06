@@ -21,6 +21,7 @@ class Converter:
 		self.changelog = [] # gross change list, each item is ([date, ip, type, id, user, sum, extra], itempath, itemtype)
 		self.changes = { 'page': {}, 'media': {} } # per-id change list, { itemtype: { id: [date, ip, type, id, user, sum, extra] } }
 		self.commands = [] # shell commands to run
+		self.notesref = 'refs/notes/dokuwiki2git' # git notes ref to record informations during import
 
 	def create_git_repository(self):
 		log.info('Creating git repository')
@@ -65,10 +66,20 @@ class Converter:
 				return None
 
 		def add_commit(c, itempath, itemtype):
+
+			def pack_notes(notes):
+				list = []
+				for (key, value) in notes:
+					list.append('%s: %s' % (key, json.dumps(value, ensure_ascii=False)))
+				return '\n'.join(list)
+		
 			timestamp, ip, type, id, user, message, extra = c
 			subpath = id.replace(':', '/')
 			source_file = get_source_file(itemtype, subpath, timestamp)
 			if source_file is None: return
+			# init notes
+			notes = [] # [ [key1, value2], [key2, value2], ... ]
+			notes.append(['log', c])
 			# author (user <email>)
 			email = ''
 			if len(user) == 0:
@@ -108,6 +119,7 @@ class Converter:
 			elif type == 'D': # delete
 				cmds.append('git rm --quiet %s' % self.shell_quote(target_file))
 			cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
+			cmds.append('git notes --ref=%s add -m %s' % (self.shell_quote(self.notesref), self.shell_quote(pack_notes(notes))))
 			self.commands.extend(cmds)
 
 		log.info('Reading attic')
