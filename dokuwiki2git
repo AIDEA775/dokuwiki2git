@@ -134,6 +134,7 @@ class Converter:
 		itemtype = 'page'
 		for path, dirs, files in os.walk(root):
 			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
 				if fnmatch.fnmatch(f, '*.txt') or fnmatch.fnmatch(f, '*.txt.gz') or fnmatch.fnmatch(f, '*.txt.bz2'):
 					fullpath = os.path.join(path, f)
 					subpath = os.path.relpath(fullpath, root)
@@ -148,7 +149,7 @@ class Converter:
 		itemtype = 'media'
 		for path, dirs, files in os.walk(root):
 			for f in files:
-				if fnmatch.fnmatch(f, '_*'): return
+				if fnmatch.fnmatch(f, '_*'): continue
 				fullpath = os.path.join(path, f)
 				subpath = os.path.relpath(fullpath, root)
 				subpath0, timestamp, subpath1 = subpath.rsplit('.', 2)
@@ -158,7 +159,6 @@ class Converter:
 	def read_meta(self):
 
 		def read_meta_file(itemtype, subpath, fullpath):
-			if fnmatch.fnmatch(subpath, '_*'): return
 			id = subpath.replace('/', ':')
 			log.debug('Reading meta for %s "%s"' % (itemtype, id))
 			with open(fullpath, 'rb') as f:
@@ -182,6 +182,7 @@ class Converter:
 		items = 0
 		for path, dirs, files in os.walk(root):
 			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
 				if fnmatch.fnmatch(f, '*.changes'):
 					fullpath = os.path.join(path, f)
 					subpath = os.path.splitext(os.path.relpath(fullpath, root))[0]
@@ -196,6 +197,7 @@ class Converter:
 		items = 0
 		for path, dirs, files in os.walk(root):
 			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
 				if fnmatch.fnmatch(f, '*.changes'):
 					fullpath = os.path.join(path, f)
 					subpath = os.path.splitext(os.path.relpath(fullpath, root))[0]
@@ -218,6 +220,7 @@ class Converter:
 		items = 0
 		for path, dirs, files in os.walk(root):
 			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
 				if fnmatch.fnmatch(f, '*.txt'):
 					filename = os.path.join(path, f)
 					id = os.path.splitext(os.path.relpath(filename, root))[0].replace('/', ':')
@@ -239,7 +242,8 @@ class Converter:
 		items = 0
 		for path, dirs, files in os.walk(root):
 			for f in files:
-				if not fnmatch.fnmatch(f, '_*'):
+				if fnmatch.fnmatch(f, '_*'): continue
+				if True:
 					filename = os.path.join(path, f)
 					id = os.path.relpath(filename, root).replace('/', ':')
 					timestamp = str(int(os.path.getmtime(filename)))
