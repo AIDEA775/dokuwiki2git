@@ -18,7 +18,7 @@ class Converter:
 		self.args = None # arguments from the command line
 		self.dwdata = {} # setting data loaded from the dokuwiki
 		self.users = {} # user data loaded from the dokuwiki
-		self.changelog = [] # gross change list, each item is ([date, ip, type, id, user, sum, extra], itempath, itemtype)
+		self.changelog = [] # gross change list, each item is ([date, ip, type, id, user, sum, extra], itempath, itemtype, itemextra)
 		self.changes = { 'page': {}, 'media': {} } # per-id change list, { itemtype: { id: [date, ip, type, id, user, sum, extra] } }
 		self.commands = [] # shell commands to run
 		self.notesref = 'refs/notes/dokuwiki2git' # git notes ref to record informations during import
@@ -65,23 +65,26 @@ class Converter:
 				log.warn('Attic file of media "%s" with timestamp "%s" is missing' % (subpath, timestamp))
 				return None
 
-		def add_commit(c, itempath, itemtype):
+		def add_commit(c, itempath, itemtype, itemextra):
 
 			def pack_notes(notes):
 				list = []
 				for (key, value) in notes:
 					list.append('%s: %s' % (key, json.dumps(value, ensure_ascii=False)))
 				return '\n'.join(list)
-		
+
+			# init notes
+			notes = [] # [ [key1, value2], [key2, value2], ... ]
+			notes.append(['log', c])
+			if 'external edit auto-detected' in itemextra:
+				notes.append(['info', 'external edit auto-detected'])
+			# init variables
 			timestamp, ip, type, id, user, message, extra = c
 			if id != itempath:
 				log.warn('Log of %s "%s" records id "%s" at timestamp %s, resolve as if it has been %s' % (itemtype, itempath, id, timestamp, itempath))
 				id = itempath
 			subpath = id.replace(':', '/')
 			source_file = get_source_file(itemtype, subpath, timestamp)
-			# init notes
-			notes = [] # [ [key1, value2], [key2, value2], ... ]
-			notes.append(['log', c])
 			# author (user <email>)
 			email = ''
 			if len(user) == 0:
@@ -130,8 +133,8 @@ class Converter:
 			self.commands.extend(cmds)
 
 		log.info('Reading attic')
-		for (c, itempath, itemtype) in self.changelog:
-			add_commit(c, itempath, itemtype)
+		for (c, itempath, itemtype, itemextra) in self.changelog:
+			add_commit(c, itempath, itemtype, itemextra)
 
 	def check_attic(self):
 
@@ -184,7 +187,7 @@ class Converter:
 					log.debug(changeparts)
 					assert(len(changeparts) == 7)
 					assert(changeparts[2] in ('C', 'D', 'E', 'e', 'R')) # create, delete, edit, minor edit, restore
-					entry = (changeparts, id, itemtype)
+					entry = (changeparts, id, itemtype, {})
 					self.changelog.append(entry)
 					dict = self.changes[itemtype]
 					if id not in dict: dict[id] = []
@@ -245,7 +248,7 @@ class Converter:
 						type = 'C' if c is None or c[2] == 'D' else 'E'
 						changeparts = [timestamp, '127.0.0.1', type, id, '', self.dwdata['lang']['external_edit'].encode('UTF-8'), '']
 						log.debug(changeparts)
-						entry = (changeparts, id, itemtype)
+						entry = (changeparts, id, itemtype, {'external edit auto-detected':True})
 						self.changelog.append(entry)
 						items += 1
 		log.info('%d newly edited pages found' % (items))
@@ -267,7 +270,7 @@ class Converter:
 						type = 'C' if c is None or c[2] == 'D' else 'E'
 						changeparts = [timestamp, '127.0.0.1', type, id, '', self.dwdata['lang']['external_edit'].encode('UTF-8'), '']
 						log.debug(changeparts)
-						entry = (changeparts, id, itemtype)
+						entry = (changeparts, id, itemtype, {'external edit auto-detected':True})
 						self.changelog.append(entry)
 						items += 1
 		log.info('%d newly edited media found' % (items))
