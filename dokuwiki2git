@@ -21,11 +21,11 @@ class Converter:
 		self.changelog = [] # gross change list, each item is ([date, ip, type, id, user, sum, extra], itempath, itemtype, itemextra)
 		self.changes = { 'page': {}, 'media': {} } # per-id change list, { itemtype: { id: [date, ip, type, id, user, sum, extra] } }
 		self.commands = [] # shell commands to run
+		self.since = '' # timestamp to start import
 
 	def create_git_repository(self):
-		log.info('Creating git repository')
+		log.info('Importing to git')
 		origdir = os.getcwd()
-		os.mkdir(self.args.outputdir)
 		os.chdir(self.args.outputdir)
 		# run all commands
 		for c in self.commands:
@@ -79,6 +79,7 @@ class Converter:
 				notes.append(['info', 'external edit auto-detected'])
 			# init variables
 			timestamp, ip, type, id, user, message, extra = c
+			if timestamp < self.since: return
 			if id != itempath:
 				log.warn('Log of %s "%s" records id "%s" at timestamp %s, resolve as if it has been %s' % (itemtype, itempath, id, timestamp, itempath))
 				id = itempath
@@ -290,6 +291,7 @@ class Converter:
 		parser = argparse.ArgumentParser(
 			prog='dokuwiki2git',
 			description='''dokuwiki2git converts dokuwiki data directory into a git repository containing the wiki pages, with proper history. Thus, migration to git-backed wiki engines (eg. gollum) becomes easier.''')
+		parser.add_argument('-i', '--incremental', action='store_true', dest='incremental', help='''import only the changes since the HEAD author date if a git repo already exists''')
 		parser.add_argument('-o', '--output', dest='outputdir', default = 'gitdir', metavar='<output dir>', help='''directory to create the git repo (default: %(default)s)''')
 		parser.add_argument('-u', '--users', dest='import_user', action='store_true', help='''record the author of every change with real user name and email from dokuwiki database, instead of id@dokuwiki-domain''')
 		parser.add_argument('-e', '--external-edit', action='store_true', dest='external_edit', help='''import external edits not recorded in meta .changes''')
@@ -314,8 +316,30 @@ class Converter:
 			sys.exit(1)
 		# check output directory
 		if os.path.exists(args.outputdir):
-			log.error('There is already something at the output directory path "%s"' % args.outputdir)
-			sys.exit(1)
+			if args.incremental:
+				# check whether the output directory is a valid git repo
+				# currently we don't support a bare repo
+				try:
+					gitdir = os.path.join(args.outputdir, '.git')
+					assert(os.path.exists(gitdir))
+					subprocess.check_output('git --git-dir %s rev-parse --git-dir 2>/dev/null' % self.shell_quote(gitdir), shell=True)
+				except:
+					log.error('The specified output directory is not a valid git repository "%s"' % args.outputdir)
+					sys.exit(1)
+				# record the last author date from the active branch if it has at least one commit
+				try:
+					self.since = subprocess.check_output('git --git-dir %s log -n 1 --pretty="format:%%at" 2>/dev/null' % self.shell_quote(gitdir), shell=True)
+					log.info('Import data since %s' % self.since)
+				except:
+					pass
+			else:
+				log.error('There is already something at the output directory path "%s"' % args.outputdir)
+				sys.exit(1)
+		else:
+			os.mkdir(self.args.outputdir)
+			self.commands.append('git init --quiet')
+			self.commands.append('git config notes.displayRef %s' % self.shell_quote(self.args.notes_ref))
+			self.commands.append('git config notes.rewriteRef %s' % self.shell_quote(self.args.notes_ref))
 		# read user Real Name and email from dokuwiki, if requested and available
 		if self.args.import_user and self.dwdata['conf']['authtype'] == 'authplain':
 			self.read_user_data()
@@ -329,9 +353,6 @@ class Converter:
 		self.changelog.sort()
 		
 		# build commands
-		self.commands.append('git init --quiet')
-		self.commands.append('git config notes.displayRef %s' % self.shell_quote(self.args.notes_ref))
-		self.commands.append('git config notes.rewriteRef %s' % self.shell_quote(self.args.notes_ref))
 		# for each change history collected, find the corresponding history data file and build the import commands
 		self.read_attic()
 		# check the attic/ and media_attic/ for data files not recorded in the change history
