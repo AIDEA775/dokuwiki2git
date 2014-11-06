@@ -21,7 +21,6 @@ class Converter:
 		self.changelog = [] # gross change list, each item is ([date, ip, type, id, user, sum, extra], itempath, itemtype, itemextra)
 		self.changes = { 'page': {}, 'media': {} } # per-id change list, { itemtype: { id: [date, ip, type, id, user, sum, extra] } }
 		self.commands = [] # shell commands to run
-		self.notesref = 'refs/notes/dokuwiki2git' # git notes ref to record informations during import
 
 	def create_git_repository(self):
 		log.info('Creating git repository')
@@ -129,7 +128,7 @@ class Converter:
 			elif type == 'D': # delete
 				cmds.append('git rm --quiet %s' % self.shell_quote(target_file))
 			cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
-			cmds.append('git notes --ref=%s add -m %s' % (self.shell_quote(self.notesref), self.shell_quote(pack_notes(notes))))
+			cmds.append('git notes --ref=%s add -m %s' % (self.shell_quote(self.args.notes_ref), self.shell_quote(pack_notes(notes))))
 			self.commands.extend(cmds)
 
 		log.info('Reading attic')
@@ -296,6 +295,7 @@ class Converter:
 		parser.add_argument('-e', '--external-edit', action='store_true', dest='external_edit', help='''import external edits not recorded in meta .changes''')
 		parser.add_argument('-q', '--quiet', action='store_const', dest='verbose', const=0, default=1, help='''show only warnings and errors''')
 		parser.add_argument('-v', '--verbose', action='store_const', dest='verbose', const=2, default=1, help='''show debug messages''')
+		parser.add_argument('--notes-ref', metavar='<notes ref>', action='store', dest='notes_ref', default='refs/notes/dokuwiki2git', help='''record the import information to this ref (default: %(default)s)''')
 		parser.add_argument('dwdir', metavar='<dokuwiki dir>', help='''path to dokuwiki''')
 		parser.add_argument('domain', metavar='<dokuwiki domain>', nargs='?', default='dokuwiki.localhost', help='''domain name (or IP) of the dokuwiki site, for better authorship tracing''')
 
@@ -330,8 +330,8 @@ class Converter:
 		
 		# build commands
 		self.commands.append('git init --quiet')
-		self.commands.append('git config notes.displayRef %s' % self.shell_quote(self.notesref))
-		self.commands.append('git config notes.rewriteRef %s' % self.shell_quote(self.notesref))
+		self.commands.append('git config notes.displayRef %s' % self.shell_quote(self.args.notes_ref))
+		self.commands.append('git config notes.rewriteRef %s' % self.shell_quote(self.args.notes_ref))
 		# for each change history collected, find the corresponding history data file and build the import commands
 		self.read_attic()
 		# check the attic/ and media_attic/ for data files not recorded in the change history
