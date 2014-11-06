@@ -74,6 +74,9 @@ class Converter:
 				return '\n'.join(list)
 		
 			timestamp, ip, type, id, user, message, extra = c
+			if id != itempath:
+				log.warn('Log of %s "%s" records id "%s" at timestamp %s, resolve as if it has been %s' % (itemtype, itempath, id, timestamp, itempath))
+				id = itempath
 			subpath = id.replace(':', '/')
 			source_file = get_source_file(itemtype, subpath, timestamp)
 			# init notes
@@ -180,7 +183,6 @@ class Converter:
 					changeparts = line.split('\t')
 					log.debug(changeparts)
 					assert(len(changeparts) == 7)
-					assert(changeparts[3] == id)
 					assert(changeparts[2] in ('C', 'D', 'E', 'e', 'R')) # create, delete, edit, minor edit, restore
 					entry = (changeparts, id, itemtype)
 					self.changelog.append(entry)
