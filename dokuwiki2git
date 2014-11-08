@@ -22,6 +22,9 @@ class Converter:
 		self.changes = { 'page': {}, 'media': {} } # per-id change list, { itemtype: { id: [date, ip, type, id, user, sum, extra] } }
 		self.commands = [] # shell commands to run
 		self.since = '' # timestamp to start import
+		# associative array to resolve mismatch of meta file id and logged file id
+		# last_id[itemid] = id
+		self.resolve_move = { 'last_id': {} }
 
 	def create_git_repository(self):
 		log.info('Importing to git')
@@ -66,6 +69,13 @@ class Converter:
 				log.warn('Attic file of media "%s" with timestamp "%s" is missing' % (subpath, timestamp))
 				return None
 
+		def get_target_file(itemtype, subpath):
+			if itemtype == 'page':
+				target_file = os.path.join('pages', '%s.txt' % subpath)
+			elif itemtype == 'media':
+				target_file = os.path.join('media', subpath)
+			return target_file
+
 		def add_commit(c, itemid, itemtype, itemextra):
 
 			def pack_notes(notes):
@@ -74,6 +84,8 @@ class Converter:
 					list.append('%s: %s' % (key, json.dumps(value, ensure_ascii=False)))
 				return '\n'.join(list)
 
+			# init commands	
+			cmds = []
 			# init notes
 			notes = [] # [ [key1, value2], [key2, value2], ... ]
 			notes.append(['log', c])
@@ -82,11 +94,33 @@ class Converter:
 			# init variables
 			timestamp, ip, type, id, user, message, extra = c
 			if timestamp < self.since: return
-			if id != itemid:
-				log.warn('Log of %s "%s" records id "%s" at timestamp %s, resolve as if it has been %s' % (itemtype, itemid, id, timestamp, itemid))
-				id = itemid
-			subpath = id.replace(':', '/')
-			source_file = get_source_file(itemtype, subpath, timestamp)
+			# if self.args.resolve_move == 'none': should never happen since it's already ruled-out during read_meta()
+			if self.args.resolve_move == 'file':
+				if id != itemid:
+					log.warn('Log of %s "%s" records id "%s" at timestamp %s, resolve as if it has been %s' % (itemtype, itemid, id, timestamp, itemid))
+					id = itemid
+			elif self.args.resolve_move == 'log':
+				if id != itemid:
+					log.warn('Log of %s "%s" records id "%s" at timestamp %s, resolve as if it was %s' % (itemtype, itemid, id, timestamp, id))
+				if itemid in self.resolve_move['last_id']:
+					last_id = self.resolve_move['last_id'][itemid]
+					# id changed, record as a move
+					if last_id != id:
+						log.warn('Record %s move from "%s" to "%s" at timestamp %s' % (itemtype, last_id, id, timestamp))
+						subpath = last_id.replace(':', '/')
+						old_file = get_target_file(itemtype, subpath)
+						subpath = id.replace(':', '/')
+						new_file = get_target_file(itemtype, subpath)
+						cmds.append('''echo "$(git ls-files -s %s | sed 's/\\t.*$/\\t/')"%s | git update-index --add --index-info''' % (self.shell_quote(old_file), self.shell_quote(new_file)))
+						cmds.append('git rm --quiet --cached --ignore-unmatch %s' % self.shell_quote(old_file))
+				self.resolve_move['last_id'][itemid] = id
+			if self.args.resolve_move == 'log':
+				subpath = itemid.replace(':', '/')
+				source_file = get_source_file(itemtype, subpath, timestamp)
+				subpath = id.replace(':', '/')
+			else:
+				subpath = id.replace(':', '/')
+				source_file = get_source_file(itemtype, subpath, timestamp)
 			# author (user <email>)
 			email = self.args.site_mail
 			if len(user) == 0:
@@ -101,12 +135,8 @@ class Converter:
 			elif itemtype == 'media':
 				message = '(media) %s: %s' % (subpath, message)
 			# target_file
-			if itemtype == 'page':
-				target_file = os.path.join('pages', '%s.txt' % subpath)
-			elif itemtype == 'media':
-				target_file = os.path.join('media', subpath)
+			target_file = get_target_file(itemtype, subpath)
 			# build commands
-			cmds = []
 			if type in ('C', 'E', 'e', 'R'): # create, edit, minor edit, restore
 				if source_file is not None:
 					if itemtype == 'page':
@@ -184,6 +214,9 @@ class Converter:
 					log.debug(changeparts)
 					assert(len(changeparts) == 7)
 					assert(changeparts[2] in ('C', 'D', 'E', 'e', 'R')) # create, delete, edit, minor edit, restore
+					if changeparts[3] != id and self.args.resolve_move == 'none':
+						log.error('Log of %s "%s" records id "%s" at timestamp %s. Please fix it, or try --resolve-move option for auto resolve.' % (itemtype, id, changeparts[3], changeparts[0]))
+						sys.exit(1)
 					entry = (changeparts, id, itemtype, {})
 					self.changelog.append(entry)
 					dict = self.changes[itemtype]
@@ -302,6 +335,7 @@ class Converter:
 		parser.add_argument('-q', '--quiet', action='store_const', dest='verbose', const=0, default=1, help='''show only warnings and errors''')
 		parser.add_argument('-v', '--verbose', action='store_const', dest='verbose', const=2, default=1, help='''show debug messages''')
 		parser.add_argument('--notes-ref', metavar='<notes ref>', action='store', dest='notes_ref', default='refs/notes/dokuwiki2git', help='''record the import information to this ref (default: %(default)s)''')
+		parser.add_argument('--resolve-move', choices=['none', 'file', 'log'], default='none', action='store', dest='resolve_move', help='''strategy if the meta file id doesn't match the changelog id: "none" to throw an error; "file" to use the meta file id; "log" to use the changelog id and attempt to record file moves (default: %(default)s)''')
 		parser.add_argument('dwdir', metavar='<dokuwiki dir>', help='''path to dokuwiki''')
 
 		# parse arguments
