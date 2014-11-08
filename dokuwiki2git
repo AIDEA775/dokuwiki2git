@@ -97,7 +97,7 @@ class Converter:
 			if itemtype == 'page':
 				message = '%s: %s' % (subpath, message)
 			elif itemtype == 'media':
-				message = 'media: %s: %s' % (subpath, message)
+				message = '(media) %s: %s' % (subpath, message)
 			# target_file
 			if itemtype == 'page':
 				target_file = os.path.join('pages', '%s.txt' % subpath)
