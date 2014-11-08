@@ -86,14 +86,12 @@ class Converter:
 			subpath = id.replace(':', '/')
 			source_file = get_source_file(itemtype, subpath, timestamp)
 			# author (user <email>)
-			email = ''
+			email = self.args.site_mail
 			if len(user) == 0:
 				user = ip
 			elif user in self.users:
 				email = self.users[user]['email']
 				user = self.users[user]['name']
-			else:
-				user = '%s@%s' % (user, self.args.domain)
 			author = '%s <%s>' % (user, email)
 			# message
 			if itemtype == 'page':
@@ -293,20 +291,20 @@ class Converter:
 			description='''dokuwiki2git converts dokuwiki data directory into a git repository containing the wiki pages, with proper history. Thus, migration to git-backed wiki engines (eg. gollum) becomes easier.''')
 		parser.add_argument('-i', '--incremental', action='store_true', dest='incremental', help='''import only the changes since the HEAD author date if a git repo already exists''')
 		parser.add_argument('-o', '--output', dest='outputdir', default = 'gitdir', metavar='<output dir>', help='''directory to create the git repo (default: %(default)s)''')
-		parser.add_argument('-u', '--users', dest='import_user', action='store_true', help='''record the author of every change with real user name and email from dokuwiki database, instead of id@dokuwiki-domain''')
+		parser.add_argument('-u', '--users', dest='import_user', action='store_true', help='''record real user name and email in the author field of each commit''')
+		parser.add_argument('-m', '--site-mail', dest='site_mail', default='dokuwiki@localhost', metavar='<text>', action='store', help='''the dummy email address to be recorded as the author email if it's not available''')
 		parser.add_argument('-e', '--external-edit', action='store_true', dest='external_edit', help='''import external edits not recorded in meta .changes''')
 		parser.add_argument('-q', '--quiet', action='store_const', dest='verbose', const=0, default=1, help='''show only warnings and errors''')
 		parser.add_argument('-v', '--verbose', action='store_const', dest='verbose', const=2, default=1, help='''show debug messages''')
 		parser.add_argument('--notes-ref', metavar='<notes ref>', action='store', dest='notes_ref', default='refs/notes/dokuwiki2git', help='''record the import information to this ref (default: %(default)s)''')
 		parser.add_argument('dwdir', metavar='<dokuwiki dir>', help='''path to dokuwiki''')
-		parser.add_argument('domain', metavar='<dokuwiki domain>', nargs='?', default='dokuwiki.localhost', help='''domain name (or IP) of the dokuwiki site, for better authorship tracing''')
 
 		# parse arguments
 		self.args = args = parser.parse_args(params)
 		log.setLevel((logging.WARN, logging.INFO, logging.DEBUG)[args.verbose])
 
 		time_start = time.time()
-		log.info('Import data from dokuwiki "%s" at domain "%s"' % (args.dwdir, args.domain))
+		log.info('Import data from dokuwiki "%s" at "%s"' % (args.dwdir, args.site_mail))
 
 		# check and load dokuwiki data
 		try:
