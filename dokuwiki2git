@@ -274,6 +274,12 @@ class Converter:
 		log.info('%d newly edited media found' % (items))
 
 	def read_user_data(self):
+		# check if requested and available
+		if not self.args.import_user:
+			return
+		elif self.dwdata['conf']['authtype'] != 'authplain':
+			log.warn('The dokuwiki doesn\'t support plain auth, skip loading and importing users data')
+			return
 		log.info('Reading users.auth.php')
 		users_file = self.dwdata['config_cascade']['plainauth.users']['default'].encode('UTF-8')
 		with open(users_file, 'rb') as f:
@@ -338,9 +344,8 @@ class Converter:
 			self.commands.append('git init --quiet')
 			self.commands.append('git config notes.displayRef %s' % self.shell_quote(self.args.notes_ref))
 			self.commands.append('git config notes.rewriteRef %s' % self.shell_quote(self.args.notes_ref))
-		# read user Real Name and email from dokuwiki, if requested and available
-		if self.args.import_user and self.dwdata['conf']['authtype'] == 'authplain':
-			self.read_user_data()
+		# read user Real Name and email from dokuwiki
+		self.read_user_data()
 
 		# collect history
 		# go through meta/ and media_meta/ *.changes to collect the change history
