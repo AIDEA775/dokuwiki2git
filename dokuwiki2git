@@ -18,7 +18,7 @@ class Converter:
 		self.args = None # arguments from the command line
 		self.dwdata = {} # setting data loaded from the dokuwiki
 		self.users = {} # user data loaded from the dokuwiki
-		self.changelog = [] # gross change list, each item is ([date, ip, type, id, user, sum, extra], itempath, itemtype, itemextra)
+		self.changelog = [] # gross change list, each item is ([date, ip, type, id, user, sum, extra], itemid, itemtype, itemextra)
 		self.changes = { 'page': {}, 'media': {} } # per-id change list, { itemtype: { id: [date, ip, type, id, user, sum, extra] } }
 		self.commands = [] # shell commands to run
 		self.since = '' # timestamp to start import
@@ -64,7 +64,7 @@ class Converter:
 				log.warn('Attic file of media "%s" with timestamp "%s" is missing' % (subpath, timestamp))
 				return None
 
-		def add_commit(c, itempath, itemtype, itemextra):
+		def add_commit(c, itemid, itemtype, itemextra):
 
 			def pack_notes(notes):
 				list = []
@@ -80,9 +80,9 @@ class Converter:
 			# init variables
 			timestamp, ip, type, id, user, message, extra = c
 			if timestamp < self.since: return
-			if id != itempath:
-				log.warn('Log of %s "%s" records id "%s" at timestamp %s, resolve as if it has been %s' % (itemtype, itempath, id, timestamp, itempath))
-				id = itempath
+			if id != itemid:
+				log.warn('Log of %s "%s" records id "%s" at timestamp %s, resolve as if it has been %s' % (itemtype, itemid, id, timestamp, itemid))
+				id = itemid
 			subpath = id.replace(':', '/')
 			source_file = get_source_file(itemtype, subpath, timestamp)
 			# author (user <email>)
@@ -131,8 +131,8 @@ class Converter:
 			self.commands.extend(cmds)
 
 		log.info('Reading attic')
-		for (c, itempath, itemtype, itemextra) in self.changelog:
-			add_commit(c, itempath, itemtype, itemextra)
+		for (c, itemid, itemtype, itemextra) in self.changelog:
+			add_commit(c, itemid, itemtype, itemextra)
 
 	def check_attic(self):
 
