@@ -26,6 +26,8 @@ class Converter:
 	def create_git_repository(self):
 		log.info('Importing to git')
 		origdir = os.getcwd()
+		if not os.path.exists(self.args.outputdir):
+			os.mkdir(self.args.outputdir)
 		os.chdir(self.args.outputdir)
 		# run all commands
 		for c in self.commands:
@@ -339,11 +341,6 @@ class Converter:
 			else:
 				log.error('There is already something at the output directory path "%s"' % args.outputdir)
 				sys.exit(1)
-		else:
-			os.mkdir(self.args.outputdir)
-			self.commands.append('git init --quiet')
-			self.commands.append('git config notes.displayRef %s' % self.shell_quote(self.args.notes_ref))
-			self.commands.append('git config notes.rewriteRef %s' % self.shell_quote(self.args.notes_ref))
 		# read user Real Name and email from dokuwiki
 		self.read_user_data()
 
@@ -356,6 +353,10 @@ class Converter:
 		self.changelog.sort()
 		
 		# build commands
+		if not os.path.exists(args.outputdir):
+			self.commands.append('git init --quiet')
+			self.commands.append('git config notes.displayRef %s' % self.shell_quote(self.args.notes_ref))
+			self.commands.append('git config notes.rewriteRef %s' % self.shell_quote(self.args.notes_ref))
 		# for each change history collected, find the corresponding history data file and build the import commands
 		self.read_attic()
 		# check the attic/ and media_attic/ for data files not recorded in the change history
