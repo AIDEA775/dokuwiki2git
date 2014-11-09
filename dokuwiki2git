@@ -125,7 +125,7 @@ class Converter:
 				cmds.append('git update-index --add --cacheinfo 100644 %s %s' % (sha, self.shell_quote(target_file)))
 			elif type == 'D': # delete
 				cmds.append('git rm --quiet --cached --ignore-unmatch %s' % self.shell_quote(target_file))
-			cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
+			cmds.append('git --work-tree . commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
 			cmds.append('git notes --ref=%s add -m %s' % (self.shell_quote(self.args.notes_ref), self.shell_quote(pack_notes(notes))))
 			self.commands.extend(cmds)
 
@@ -321,12 +321,16 @@ class Converter:
 		if os.path.exists(args.outputdir):
 			if args.incremental:
 				# check whether the output directory is a valid git repo
-				# currently we don't support a bare repo
+				repo_valid = False
 				try:
-					gitdir = os.path.join(args.outputdir, '.git')
-					assert(os.path.exists(gitdir))
-					subprocess.check_output('git --git-dir %s rev-parse --git-dir 2>/dev/null' % self.shell_quote(gitdir), shell=True)
+					output2gitdir = subprocess.check_output('cd %s && git rev-parse --git-dir 2>/dev/null' % self.shell_quote(args.outputdir), shell=True)
+					gitdir = output2gitdir if os.path.isabs(output2gitdir) else os.path.join(args.outputdir, output2gitdir)
+					# check whether gitdir is outputdir or a subdirectory of outputdir
+					if not os.path.relpath(gitdir, args.outputdir).startswith(os.pardir + os.sep):
+						repo_valid = True
 				except:
+					pass
+				if not repo_valid:
 					log.error('The specified output directory is not a valid git repository "%s"' % args.outputdir)
 					sys.exit(1)
 				# record the last author date from the active branch if it has at least one commit
@@ -359,7 +363,7 @@ class Converter:
 		# check the attic/ and media_attic/ for data files not recorded in the change history
 		self.check_attic()
 		# add a note for importing
-		self.commands.append('git commit --quiet --allow-empty --author="dokuwiki2git <dokuwiki2git@hoxu.github.com>" -m "Dokuwiki data imported by dokuwiki2git"')
+		self.commands.append('git --work-tree . commit --quiet --allow-empty --author="dokuwiki2git <dokuwiki2git@hoxu.github.com>" -m "Dokuwiki data imported by dokuwiki2git"')
 
 		# start running the shell commands
 		log.info('%d commands queued to be executed' % len(self.commands))
