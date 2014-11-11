@@ -123,6 +123,8 @@ class Converter:
 			notes.append(['log', c])
 			if 'external edit auto-detected' in itemextra:
 				notes.append(['info', 'external edit auto-detected'])
+			elif 'log hidden' in itemextra:
+				notes.append(['info', 'log hidden'])
 			# init variables
 			timestamp, ip, type, id, user, message, extra = c
 			if timestamp < self.since: return
@@ -260,7 +262,7 @@ class Converter:
 
 	def read_meta(self):
 
-		def read_meta_file(itemtype, subpath, fullpath):
+		def read_meta_file(itemtype, subpath, fullpath, hidden=False):
 			id = subpath.replace('/', ':')
 			log.debug('Reading meta for %s "%s"' % (itemtype, id))
 			with open(fullpath, 'rb') as f:
@@ -274,7 +276,7 @@ class Converter:
 					if changeparts[3] != id and self.args.resolve_move == 'none':
 						log.error('%s records a mismatching id "%s" at timestamp %s. Please fix it, or try --resolve-move option for an auto resolve.' % (fullpath, changeparts[3], changeparts[0]))
 						sys.exit(1)
-					entry = (changeparts, id, itemtype, {})
+					entry = (changeparts, id, itemtype, {} if not hidden else {'log hidden':True})
 					self.changelog.append(entry)
 					dict = self.changes[itemtype]
 					if id not in dict: dict[id] = []
@@ -295,6 +297,21 @@ class Converter:
 		logs = len(self.changelog)
 		log.info('%d changelog entries for %d pages found' % (logs, items))
 
+		log.info('Reading meta' + self.args.backup_suffix)
+		root = self.dwdata['conf']['metadir'].encode('UTF-8') + self.args.backup_suffix
+		itemtype = 'page'
+		items = 0
+		for path, dirs, files in os.walk(root):
+			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
+				if fnmatch.fnmatch(f, '*.changes'):
+					fullpath = os.path.join(path, f)
+					subpath = os.path.splitext(os.path.relpath(fullpath, root))[0]
+					read_meta_file(itemtype, subpath, fullpath, True)
+					items += 1
+		logs = len(self.changelog)
+		log.info('%d changelog entries for %d pages found' % (logs, items))
+
 		log.info('Reading media_meta')
 		root = self.dwdata['conf']['mediametadir'].encode('UTF-8')
 		itemtype = 'media'
@@ -310,12 +327,27 @@ class Converter:
 		logs = len(self.changelog) - logs
 		log.info('%d changelog entries for %d media found' % (logs, items))
 
+		log.info('Reading media_meta' + self.args.backup_suffix)
+		root = self.dwdata['conf']['mediametadir'].encode('UTF-8') + self.args.backup_suffix
+		itemtype = 'media'
+		items = 0
+		for path, dirs, files in os.walk(root):
+			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
+				if fnmatch.fnmatch(f, '*.changes'):
+					fullpath = os.path.join(path, f)
+					subpath = os.path.splitext(os.path.relpath(fullpath, root))[0]
+					read_meta_file(itemtype, subpath, fullpath, True)
+					items += 1
+		logs = len(self.changelog) - logs
+		log.info('%d changelog entries for %d media found' % (logs, items))
+
 	def read_pages_and_media(self):
 
 		def last_changelog_entry(itemtype, id):
 			dict = self.changes[itemtype]
 			if id in dict:
-				return dict[id][-1]
+				return max(dict[id])
 			return None
 
 		log.info('Reading pages/ for possible external edits')
