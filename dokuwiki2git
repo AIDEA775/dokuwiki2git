@@ -215,7 +215,7 @@ class Converter:
 					assert(len(changeparts) == 7)
 					assert(changeparts[2] in ('C', 'D', 'E', 'e', 'R')) # create, delete, edit, minor edit, restore
 					if changeparts[3] != id and self.args.resolve_move == 'none':
-						log.error('Log of %s "%s" records id "%s" at timestamp %s. Please fix it, or try --resolve-move option for auto resolve.' % (itemtype, id, changeparts[3], changeparts[0]))
+						log.error('%s records a mismatching id "%s" at timestamp %s. Please fix it, or try --resolve-move option for an auto resolve.' % (fullpath, changeparts[3], changeparts[0]))
 						sys.exit(1)
 					entry = (changeparts, id, itemtype, {})
 					self.changelog.append(entry)
