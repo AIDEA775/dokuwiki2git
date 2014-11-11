@@ -165,14 +165,14 @@ class Converter:
 
 	def check_attic(self):
 
-		def check_changelog_entry(itemtype, subpath, timestamp):
+		def check_changelog_entry(itemtype, fullpath, subpath, timestamp):
 			id = subpath.replace('/', ':')
 			dict = self.changes[itemtype]
 			if id in dict:
 				for c in dict[id]:
 					if timestamp == c[0] and id == c[3]:
 						return
-			log.warn('Attic file of %s "%s" with timestamp %s is not referenced by the changelog' % (itemtype, id, timestamp))
+			log.warn('%s is not referenced by the changelog' % fullpath)
 
 		log.info('Checking attic')
 		root = self.dwdata['conf']['olddir'].encode('UTF-8')
@@ -187,7 +187,7 @@ class Converter:
 						subpath, timestamp, txt = subpath.rsplit('.', 2)
 					else:
 						subpath, timestamp, txt, zip = subpath.rsplit('.', 3)
-					check_changelog_entry(itemtype, subpath, timestamp)
+					check_changelog_entry(itemtype, fullpath, subpath, timestamp)
 
 		log.info('Checking media_attic')
 		root = self.dwdata['conf']['mediaolddir'].encode('UTF-8')
@@ -199,7 +199,7 @@ class Converter:
 				subpath = os.path.relpath(fullpath, root)
 				subpath0, timestamp, subpath1 = subpath.rsplit('.', 2)
 				subpath = '%s.%s' % (subpath0, subpath1)
-				check_changelog_entry(itemtype, subpath, timestamp)
+				check_changelog_entry(itemtype, fullpath, subpath, timestamp)
 
 	def read_meta(self):
 
