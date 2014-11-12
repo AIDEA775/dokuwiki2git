@@ -79,10 +79,7 @@ class Converter:
 		def add_commit(c, itemid, itemtype, itemextra):
 
 			def pack_notes(notes):
-				list = []
-				for (key, value) in notes:
-					list.append('%s: %s' % (key, json.dumps(value, ensure_ascii=False)))
-				return '\n'.join(list)
+				return '\n'.join(['%s: %s' % (key, json.dumps(value, ensure_ascii=False)) for (key, value) in notes])
 
 			# init commands	
 			cmds = []
