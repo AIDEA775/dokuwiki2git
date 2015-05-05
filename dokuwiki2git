@@ -127,7 +127,7 @@ class Converter:
 				notes.append(['info', 'log hidden'])
 			# init variables
 			timestamp, ip, type, id, user, message, extra = c
-			if timestamp < self.since: return
+			if timestamp <= self.since: return
 			# if self.args.resolve_move == 'none': should never happen since it's already ruled-out during read_meta()
 			if self.args.resolve_move == 'file':
 				if id != itemid:
