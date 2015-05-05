@@ -448,6 +448,7 @@ class Converter:
 				repo_valid = False
 				try:
 					output2gitdir = subprocess.check_output('cd %s && git rev-parse --git-dir 2>/dev/null' % self.shell_quote(args.outputdir), shell=True)
+					output2gitdir = output2gitdir.rstrip()
 					gitdir = output2gitdir if os.path.isabs(output2gitdir) else os.path.join(args.outputdir, output2gitdir)
 					# check whether gitdir is outputdir or a subdirectory of outputdir
 					if not os.path.relpath(gitdir, args.outputdir).startswith(os.pardir + os.sep):
