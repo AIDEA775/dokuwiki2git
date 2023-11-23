@@ -270,6 +270,8 @@ class Converter:
 					line = line.rstrip('\n')
 					if len(line) == 0: continue
 					changeparts = line.split('\t')
+					if len(changeparts) == 8:
+						del changeparts[7]
 					log.debug(changeparts)
 					assert(len(changeparts) == 7)
 					assert(changeparts[2] in ('C', 'D', 'E', 'e', 'R')) # create, delete, edit, minor edit, restore
