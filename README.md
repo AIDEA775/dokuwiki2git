@@ -5,35 +5,34 @@ dokuwiki2git converts dokuwiki data directory into a git repository containing
 the wiki pages, with proper history. Thus, migration to git-backed wiki engines
 (eg. gollum) becomes easier.
 
+Requirements
+-----
+* python >= 2.7
+* php enough to host the dokuwiki site that is to be converted
+* git
+* gzip
+* bzip2
+
 Usage
 -----
 
-    $ dokuwiki2git /path/to/dokuwiki/data
+    $ dokuwiki2git [options] /path/to/dokuwiki
 
 This will create a git repository in `gitdir/`, containing the whole history of
-the dokuwiki pages, one commit per change.
+the dokuwiki pages and media, one commit per change.
 
 Details
 -------
 
-Change files (`*.changes`) under `data/meta` are read for changelog information
-of each page. The changelog of all pages is then sorted by date, and a separate
-commit is created from each changelog entry, with the content taken from
-`data/attic/<pagename>.<timestamp>.txt.gz`. The original *author name*, *IP*,
-*date* and *change message* become standard parts of the created git commit.
+Change files (`*.changes`) under `data/meta` and `data/media_meta` are read for
+changelog information of each page or media. The changelog of all pages is then
+sorted by date, and a separate commit is created from each changelog entry, with
+the content taken from `data/attic` or `data/media_attic/`.
 
-Media files are imported under `media/`.
-
-Caveats
--------
-
-NOTE: Media file history is not imported yet. Let me know if you need this. In
-new DokuWiki:
-
-* `media/<filename>.<ext>` contains the latest version
-* `media_meta/<filepath>.<ext>.changes` contains the changelog
-* `media_attic/<filepath>.<timestamp>.<ext>` contains the old versions the
-   changelog mentions, except for the last one (which is under `media/`).
+The original *author name*, *email*, *date* and *change summary* are converted
+to standard parts of the created git commit. Other original information such as
+*IP*, *change type* or so are written to a note `refs/notes/dokuwiki2git` which 
+annotates the imported commits. 
 
 License
 -------

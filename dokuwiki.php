@@ -7,6 +7,7 @@ require_once("$dw/inc/init.php");
 $output = array(
 	'conf' => $conf,
 	'config_cascade' => $config_cascade,
+	'lang' => $lang,
 );
 
 echo json_encode($output);

@@ -1,39 +1,37 @@
 #!/usr/bin/env python
 # Copyright (c) 2011-2014 Heikki Hokkanen <hoxu at users.sf.net>
 # License: AGPLv3
+import argparse
 import fnmatch
 import logging
 import json
-import optparse
 import os
 import subprocess
 import sys
 import time
-
-USAGE = """
-dokuwiki2git converts dokuwiki data directory into a git repository containing
-the wiki pages, with proper history. Thus, migration to git-backed wiki engines
-(eg. gollum) becomes easier.
-
-$ dokuwiki2git [options] /path/to/dokuwiki"""
 
 logging.basicConfig(level = logging.DEBUG, format = '%(levelname)s - %(message)s')
 log = logging.getLogger()
 
 class Converter:
 	def __init__(self):
-		self.dwdir = None
-		self.dwdata = {} # data loaded from dokuwiki
-		self.changelog = [] # (timestamp, ip, changetype, pagename, author, comment)
-		self.commands = [] # commands to run to create the git repository
-		self.outputdir = 'gitdir'
-		self.users = {}
+		self.args = None # arguments from the command line
+		self.dwdata = {} # setting data loaded from the dokuwiki
+		self.users = {} # user data loaded from the dokuwiki
+		self.changelog = [] # gross change list, each item is ([date, ip, type, id, user, sum, extra], itemid, itemtype, itemextra)
+		self.changes = { 'page': {}, 'media': {} } # per-id change list, { itemtype: { id: [date, ip, type, id, user, sum, extra] } }
+		self.commands = [] # shell commands to run
+		self.since = '' # timestamp to start import
+		# associative array to resolve mismatch of meta file id and logged file id
+		# last_id[itemid] = id
+		self.resolve_move = { 'last_id': {} }
 
 	def create_git_repository(self):
-		log.info('Creating git repository')
+		log.info('Importing to git')
 		origdir = os.getcwd()
-		os.mkdir(self.outputdir)
-		os.chdir(self.outputdir)
+		if not os.path.exists(self.args.outputdir):
+			os.mkdir(self.args.outputdir)
+		os.chdir(self.args.outputdir)
 		# run all commands
 		for c in self.commands:
 			log.debug('CMD: %s' % c)
@@ -44,125 +42,365 @@ class Converter:
 
 	def read_attic(self):
 
-		def get_pagepath_and_timestamp(filename):
-			filename = os.path.relpath(filename, self.dwdata['conf']['olddir'].encode('UTF-8'))
-			parts = filename.rsplit('.', 2 if fnmatch.fnmatch(filename, '*.txt') else 3)
-			return parts[0], parts[1] # pagepath, timestamp
+		def get_normal_source_file(itemtype, subpath, timestamp):
+			if itemtype == 'page':
+				# try attic/ folder for each compression types
+				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), '%s.%s.txt' % (subpath, timestamp))
+				if os.path.exists(filename): return filename
+				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), '%s.%s.txt.gz' % (subpath, timestamp))
+				if os.path.exists(filename): return filename
+				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), '%s.%s.txt.bz2' % (subpath, timestamp))
+				if os.path.exists(filename): return filename
+				# try pages/ folder
+				filename = os.path.join(self.dwdata['conf']['datadir'].encode('UTF-8'), '%s.txt' % subpath)
+				if os.path.exists(filename) and str(int(os.path.getmtime(filename))) == timestamp: return filename
+				# not exist, error out
+				log.warn('Attic file of page "%s" with timestamp "%s" is missing' % (subpath, timestamp))
+				return None
+			elif itemtype == 'media':
+				parts = os.path.splitext(subpath)
+				# try media_attic/ folder
+				filename = os.path.join(self.dwdata['conf']['mediaolddir'].encode('UTF-8'), '%s.%s%s' % (parts[0], timestamp, parts[1]))
+				if os.path.exists(filename): return filename
+				# try media/ folder
+				filename = os.path.join(self.dwdata['conf']['mediadir'].encode('UTF-8'), '%s%s' % (parts[0], parts[1]))
+				if os.path.exists(filename) and str(int(os.path.getmtime(filename))) == timestamp: return filename
+				# not exist, error out
+				log.warn('Attic file of media "%s" with timestamp "%s" is missing' % (subpath, timestamp))
+				return None
 
-		def has_changelog_entry(pagepath, timestamp):
-			for c in self.changelog:
-				if timestamp == c[0] and pagepath == c[3].replace(':', '/'):
-					return
-			log.warn('Attic contains "%s" timestamp %s, but is not referenced by changelog, skipping. Please report this!' % (pagepath, timestamp))
+		def get_backup_source_file(itemtype, subpath, timestamp):
+			if itemtype == 'page':
+				# try attic/ folder for each compression types
+				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8') + self.args.backup_suffix, '%s.%s.txt' % (subpath, timestamp))
+				if os.path.exists(filename): return filename
+				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8') + self.args.backup_suffix, '%s.%s.txt.gz' % (subpath, timestamp))
+				if os.path.exists(filename): return filename
+				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8') + self.args.backup_suffix, '%s.%s.txt.bz2' % (subpath, timestamp))
+				if os.path.exists(filename): return filename
+				# try pages/ folder
+				filename = os.path.join(self.dwdata['conf']['datadir'].encode('UTF-8') + self.args.backup_suffix, '%s.txt' % subpath)
+				if os.path.exists(filename) and str(int(os.path.getmtime(filename))) == timestamp: return filename
+				# not exist, error out
+				log.warn('Attic file of page "%s" with timestamp "%s" is missing' % (subpath, timestamp))
+				return None
+			elif itemtype == 'media':
+				parts = os.path.splitext(subpath)
+				# try media_attic/ folder
+				filename = os.path.join(self.dwdata['conf']['mediaolddir'].encode('UTF-8') + self.args.backup_suffix, '%s.%s%s' % (parts[0], timestamp, parts[1]))
+				if os.path.exists(filename): return filename
+				# try media/ folder
+				filename = os.path.join(self.dwdata['conf']['mediadir'].encode('UTF-8'), '%s%s' % (parts[0], parts[1]))
+				if os.path.exists(filename) and str(int(os.path.getmtime(filename))) == timestamp: return filename
+				# not exist, error out
+				log.warn('Attic file of media "%s" with timestamp "%s" is missing' % (subpath, timestamp))
+				return None
 
-		log.info('Reading attic')
+		def add_commit(c, itemid, itemtype, itemextra):
 
-		# Check that all referenced pages exist in attic
-		for c in self.changelog:
-			timestamp = c[0]
-			pagepath = c[3].replace(':', '/')
-			filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt' % timestamp)
-			if not os.path.exists(filename):
-				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.gz' % timestamp)
-			if not os.path.exists(filename):
-				filename = os.path.join(self.dwdata['conf']['olddir'].encode('UTF-8'), pagepath + '.%s.txt.bz2' % timestamp)
-			if not os.path.exists(filename):
-				log.warn('Attic of page "%s" with timestamp "%s" does not exist, despite being in changelog, skipping' % (pagepath, timestamp))
-				continue
+			def get_source_file(itemtype, subpath, timestamp):
+				source_file = get_normal_source_file(itemtype, subpath, timestamp)
+				if source_file is None and self.args.backup_suffix:
+					source_file = get_backup_source_file(itemtype, subpath, timestamp)
+					if source_file is not None:
+						notes.append(['info', 'attic hidden'])
+				return source_file
 
-			# depending on type of change, either add or remove
-			pagefile = os.path.join('pages', pagepath + '.txt')
-			message = pagepath + ': ' + c[5]
-			user = c[4]
-			email = 'dokuwiki@%s' % (c[1])
+			def get_target_file(itemtype, subpath):
+				if itemtype == 'page':
+					target_file = os.path.join('pages', '%s.txt' % subpath)
+				elif itemtype == 'media':
+					target_file = os.path.join('media', subpath)
+				return target_file
+
+			def pack_notes(notes):
+				return '\n'.join(['%s: %s' % (key, json.dumps(value, ensure_ascii=False)) for (key, value) in notes])
+
+			# init commands	
+			cmds = []
+			# init notes
+			notes = [] # [ [key1, value2], [key2, value2], ... ]
+			notes.append(['log', c])
+			if 'external edit auto-detected' in itemextra:
+				notes.append(['info', 'external edit auto-detected'])
+			elif 'log hidden' in itemextra:
+				notes.append(['info', 'log hidden'])
+			# init variables
+			timestamp, ip, type, id, user, message, extra = c
+			if timestamp <= self.since: return
+			# if self.args.resolve_move == 'none': should never happen since it's already ruled-out during read_meta()
+			if self.args.resolve_move == 'file':
+				if id != itemid:
+					log.warn('Log of %s "%s" records id "%s" at timestamp %s, resolve as if it has been %s' % (itemtype, itemid, id, timestamp, itemid))
+					id = itemid
+			elif self.args.resolve_move == 'log':
+				if id != itemid:
+					log.warn('Log of %s "%s" records id "%s" at timestamp %s, resolve as if it was %s' % (itemtype, itemid, id, timestamp, id))
+				if itemid in self.resolve_move['last_id']:
+					last_id = self.resolve_move['last_id'][itemid]
+					# id changed, record as a move
+					if last_id != id:
+						log.warn('Record %s move from "%s" to "%s" at timestamp %s' % (itemtype, last_id, id, timestamp))
+						subpath = last_id.replace(':', '/')
+						old_file = get_target_file(itemtype, subpath)
+						subpath = id.replace(':', '/')
+						new_file = get_target_file(itemtype, subpath)
+						cmds.append('''echo "$(git ls-files -s %s | sed 's/\\t.*$/\\t/')"%s | git update-index --add --index-info''' % (self.shell_quote(old_file), self.shell_quote(new_file)))
+						cmds.append('git rm --quiet --cached --ignore-unmatch %s' % self.shell_quote(old_file))
+				self.resolve_move['last_id'][itemid] = id
+			if self.args.resolve_move == 'log':
+				subpath = itemid.replace(':', '/')
+				source_file = get_source_file(itemtype, subpath, timestamp)
+				subpath = id.replace(':', '/')
+			else:
+				subpath = id.replace(':', '/')
+				source_file = get_source_file(itemtype, subpath, timestamp)
+			# author (user <email>)
+			email = self.args.site_mail
 			if len(user) == 0:
-				user = 'dokuwiki2git'
+				user = ip
 			elif user in self.users:
 				email = self.users[user]['email']
 				user = self.users[user]['name']
 			author = '%s <%s>' % (user, email)
-			cmds = []
-			if c[2] in ('C', 'E', 'e', 'R'): # create, edit, minor edit, restore
-				dirname = os.path.dirname(pagefile)
-				if len(dirname) > 0:
-					cmds.append('mkdir -p %s' % self.shell_quote(dirname))
-				if fnmatch.fnmatch(filename, '*.txt'):
-					cmds.append('cp -a %s %s' % (self.shell_quote(filename), self.shell_quote(pagefile)))
-				elif fnmatch.fnmatch(filename, '*.txt.gz'):
-					cmds.append('gunzip -c %s > %s' % (self.shell_quote(filename), self.shell_quote(pagefile)))
-				elif fnmatch.fnmatch(filename, '*.txt.bz2'):
-					cmds.append('bunzip2 -c %s > %s' % (self.shell_quote(filename), self.shell_quote(pagefile)))
-				cmds.append('git add %s' % self.shell_quote(pagefile))
-			elif c[2] == 'D': # delete
-				cmds.append('git rm --quiet %s' % self.shell_quote(pagefile))
-			cmds.append('git commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
+			# message
+			if itemtype == 'page':
+				message = '%s: %s' % (subpath, message)
+			elif itemtype == 'media':
+				message = '(media) %s: %s' % (subpath, message)
+			# target_file
+			target_file = get_target_file(itemtype, subpath)
+			# build commands
+			if type in ('C', 'E', 'e', 'R'): # create, edit, minor edit, restore
+				if source_file is not None:
+					if itemtype == 'page':
+						if fnmatch.fnmatch(source_file, '*.txt'):
+							sha = '$(git hash-object -w -- %s)' % self.shell_quote(source_file)
+						elif fnmatch.fnmatch(source_file, '*.txt.gz'):
+							sha = '$(gunzip -c %s | git hash-object -w --stdin)' % self.shell_quote(source_file)
+						elif fnmatch.fnmatch(source_file, '*.txt.bz2'):
+							sha = '$(bunzip2 -c %s | git hash-object -w --stdin)' % self.shell_quote(source_file)
+					elif itemtype == 'media':
+						sha = '$(git hash-object -w -- %s)' % self.shell_quote(source_file)
+				else:
+					# flush a unique dummy content reather than remove the file, so that "git log -- file" can trace easily
+					sha = '$(echo "content missing after commit: %s" | git hash-object -w --stdin)' % '$(git rev-parse --verify -q HEAD || echo "0000000000000000000000000000000000000000")'
+					notes.append(['info', 'attic missing'])
+				cmds.append('git update-index --add --cacheinfo 100644 %s %s' % (sha, self.shell_quote(target_file)))
+			elif type == 'D': # delete
+				cmds.append('git rm --quiet --cached --ignore-unmatch %s' % self.shell_quote(target_file))
+			cmds.append('git --work-tree . commit --quiet --allow-empty --allow-empty-message --author=%s --date=%s -m %s' % (self.shell_quote(author), self.shell_quote(timestamp), self.shell_quote(message)))
+			cmds.append('git notes --ref=%s add -m %s' % (self.shell_quote(self.args.notes_ref), self.shell_quote(pack_notes(notes))))
 			self.commands.extend(cmds)
 
-		# check that all pages in attic have a matching changelog entry
-		for path, dirs, files in os.walk(self.dwdata['conf']['olddir'].encode('UTF-8')):
+		log.info('Reading attic')
+		for (c, itemid, itemtype, itemextra) in self.changelog:
+			add_commit(c, itemid, itemtype, itemextra)
+
+	def check_attic(self):
+
+		def check_changelog_entry(itemtype, fullpath, subpath, timestamp):
+			id = subpath.replace('/', ':')
+			dict = self.changes[itemtype]
+			if id in dict:
+				for c in dict[id]:
+					if timestamp == c[0] and id == c[3]:
+						return
+			log.warn('%s is not referenced by the changelog' % fullpath)
+
+		log.info('Checking attic')
+		root = self.dwdata['conf']['olddir'].encode('UTF-8')
+		itemtype = 'page'
+		for path, dirs, files in os.walk(root):
 			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
 				if fnmatch.fnmatch(f, '*.txt') or fnmatch.fnmatch(f, '*.txt.gz') or fnmatch.fnmatch(f, '*.txt.bz2'):
-					filename = os.path.join(path, f)
-					pagepath, timestamp = get_pagepath_and_timestamp(filename)
-					has_changelog_entry(pagepath, timestamp)
+					fullpath = os.path.join(path, f)
+					subpath = os.path.relpath(fullpath, root)
+					if fnmatch.fnmatch(fullpath, '*.txt'):
+						subpath, timestamp, txt = subpath.rsplit('.', 2)
+					else:
+						subpath, timestamp, txt, zip = subpath.rsplit('.', 3)
+					check_changelog_entry(itemtype, fullpath, subpath, timestamp)
 
-	def read_data(self):
-		self.commands.append('git init --quiet')
-		# find user Real Name and email
-		if self.dwdata['conf']['authtype'] == 'authplain':
-			self.read_user_data()
-		# go through data/meta
-		self.read_meta()
-		# sort history
-		self.changelog.sort()
-		# go through data/attic, importing pages referenced by .changes in meta
-		self.read_attic()
-		self.read_media()
-		self.commands.append('git commit --quiet --allow-empty --author="dokuwiki2git <dokuwiki2git@hoxu.github.com>" -m "Dokuwiki data imported by dokuwiki2git"')
-
-	def read_media(self):
-		log.info('Reading media')
-		for path, dirs, files in os.walk(self.dwdata['conf']['mediadir'].encode('UTF-8')):
+		root = self.dwdata['conf']['olddir'].encode('UTF-8') + self.args.backup_suffix
+		itemtype = 'page'
+		for path, dirs, files in os.walk(root):
 			for f in files:
-				fullfile = os.path.join(path, f)
-				filename = os.path.join('media', os.path.relpath(fullfile, self.dwdata['conf']['mediadir'].encode('UTF-8')))
-				dirname = os.path.dirname(filename)
-				cmds = [
-					'mkdir -p %s' % self.shell_quote(dirname),
-					'cp %s %s' % (self.shell_quote(fullfile), self.shell_quote(filename)),
-					'git add %s' % self.shell_quote(filename)
-				]
-				self.commands.extend(cmds)
-		self.commands.append('git commit --quiet --allow-empty --author="dokuwiki2git <dokuwiki2git@hoxu.github.com>" -m "Import media files"')
+				if fnmatch.fnmatch(f, '_*'): continue
+				if fnmatch.fnmatch(f, '*.txt') or fnmatch.fnmatch(f, '*.txt.gz') or fnmatch.fnmatch(f, '*.txt.bz2'):
+					fullpath = os.path.join(path, f)
+					subpath = os.path.relpath(fullpath, root)
+					if fnmatch.fnmatch(fullpath, '*.txt'):
+						subpath, timestamp, txt = subpath.rsplit('.', 2)
+					else:
+						subpath, timestamp, txt, zip = subpath.rsplit('.', 3)
+					check_changelog_entry(itemtype, fullpath, subpath, timestamp)
+
+		log.info('Checking media_attic')
+		root = self.dwdata['conf']['mediaolddir'].encode('UTF-8')
+		itemtype = 'media'
+		for path, dirs, files in os.walk(root):
+			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
+				fullpath = os.path.join(path, f)
+				subpath = os.path.relpath(fullpath, root)
+				subpath0, timestamp, subpath1 = subpath.rsplit('.', 2)
+				subpath = '%s.%s' % (subpath0, subpath1)
+				check_changelog_entry(itemtype, fullpath, subpath, timestamp)
+
+		root = self.dwdata['conf']['mediaolddir'].encode('UTF-8') + self.args.backup_suffix
+		itemtype = 'media'
+		for path, dirs, files in os.walk(root):
+			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
+				fullpath = os.path.join(path, f)
+				subpath = os.path.relpath(fullpath, root)
+				subpath0, timestamp, subpath1 = subpath.rsplit('.', 2)
+				subpath = '%s.%s' % (subpath0, subpath1)
+				check_changelog_entry(itemtype, fullpath, subpath, timestamp)
 
 	def read_meta(self):
 
-		def read_meta_page(pagepath, fullpath):
-			if fnmatch.fnmatch(pagepath, '_*'):
-				return
-			pagename = pagepath.replace('/', ':')
-			log.debug('Reading meta for page "%s"' % pagename)
+		def read_meta_file(itemtype, subpath, fullpath, hidden=False):
+			id = subpath.replace('/', ':')
+			log.debug('Reading meta for %s "%s"' % (itemtype, id))
 			with open(fullpath, 'rb') as f:
 				for line in f:
+					line = line.rstrip('\n')
+					if len(line) == 0: continue
 					changeparts = line.split('\t')
 					log.debug(changeparts)
 					assert(len(changeparts) == 7)
-					assert(changeparts[3] == pagename)
 					assert(changeparts[2] in ('C', 'D', 'E', 'e', 'R')) # create, delete, edit, minor edit, restore
-					self.changelog.append(changeparts)
+					if changeparts[3] != id and self.args.resolve_move == 'none':
+						log.error('%s records a mismatching id "%s" at timestamp %s. Please fix it, or try --resolve-move option for an auto resolve.' % (fullpath, changeparts[3], changeparts[0]))
+						sys.exit(1)
+					entry = (changeparts, id, itemtype, {} if not hidden else {'log hidden':True})
+					self.changelog.append(entry)
+					dict = self.changes[itemtype]
+					if id not in dict: dict[id] = []
+					dict[id].append(changeparts)
 
 		log.info('Reading meta')
-		pages = 0
-		for path, dirs, files in os.walk(self.dwdata['conf']['metadir'].encode('UTF-8')):
+		root = self.dwdata['conf']['metadir'].encode('UTF-8')
+		itemtype = 'page'
+		items = 0
+		for path, dirs, files in os.walk(root):
 			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
 				if fnmatch.fnmatch(f, '*.changes'):
-					relpath = os.path.relpath(os.path.join(path, f), self.dwdata['conf']['metadir'].encode('UTF-8'))
-					pagepath = relpath.rsplit('.', 1)[0]
-					read_meta_page(pagepath, os.path.join(path, f))
-					pages += 1
-		log.info('%d changelog entries for %d pages found' % (len(self.changelog), pages))
+					fullpath = os.path.join(path, f)
+					subpath = os.path.splitext(os.path.relpath(fullpath, root))[0]
+					read_meta_file(itemtype, subpath, fullpath)
+					items += 1
+		logs = len(self.changelog)
+		log.info('%d changelog entries for %d pages found' % (logs, items))
+
+		log.info('Reading meta' + self.args.backup_suffix)
+		root = self.dwdata['conf']['metadir'].encode('UTF-8') + self.args.backup_suffix
+		itemtype = 'page'
+		items = 0
+		for path, dirs, files in os.walk(root):
+			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
+				if fnmatch.fnmatch(f, '*.changes'):
+					fullpath = os.path.join(path, f)
+					subpath = os.path.splitext(os.path.relpath(fullpath, root))[0]
+					read_meta_file(itemtype, subpath, fullpath, True)
+					items += 1
+		logs = len(self.changelog)
+		log.info('%d changelog entries for %d pages found' % (logs, items))
+
+		log.info('Reading media_meta')
+		root = self.dwdata['conf']['mediametadir'].encode('UTF-8')
+		itemtype = 'media'
+		items = 0
+		for path, dirs, files in os.walk(root):
+			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
+				if fnmatch.fnmatch(f, '*.changes'):
+					fullpath = os.path.join(path, f)
+					subpath = os.path.splitext(os.path.relpath(fullpath, root))[0]
+					read_meta_file(itemtype, subpath, fullpath)
+					items += 1
+		logs = len(self.changelog) - logs
+		log.info('%d changelog entries for %d media found' % (logs, items))
+
+		log.info('Reading media_meta' + self.args.backup_suffix)
+		root = self.dwdata['conf']['mediametadir'].encode('UTF-8') + self.args.backup_suffix
+		itemtype = 'media'
+		items = 0
+		for path, dirs, files in os.walk(root):
+			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
+				if fnmatch.fnmatch(f, '*.changes'):
+					fullpath = os.path.join(path, f)
+					subpath = os.path.splitext(os.path.relpath(fullpath, root))[0]
+					read_meta_file(itemtype, subpath, fullpath, True)
+					items += 1
+		logs = len(self.changelog) - logs
+		log.info('%d changelog entries for %d media found' % (logs, items))
+
+	def read_pages_and_media(self):
+
+		def last_changelog_entry(itemtype, id):
+			dict = self.changes[itemtype]
+			if id in dict:
+				return max(dict[id])
+			return None
+
+		log.info('Reading pages/ for possible external edits')
+		root = self.dwdata['conf']['datadir'].encode('UTF-8')
+		itemtype = 'page'
+		items = 0
+		for path, dirs, files in os.walk(root):
+			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
+				if fnmatch.fnmatch(f, '*.txt'):
+					filename = os.path.join(path, f)
+					id = os.path.splitext(os.path.relpath(filename, root))[0].replace('/', ':')
+					timestamp = str(int(os.path.getmtime(filename)))
+					c = last_changelog_entry(itemtype, id) # [date, ip, type, id, user, sum, extra]
+					# if the page is not in meta or the page has newer change, create a log as an external edit
+					if c is None or c[0] < timestamp:
+						type = 'C' if c is None or c[2] == 'D' else 'E'
+						changeparts = [timestamp, '127.0.0.1', type, id, '', self.dwdata['lang']['external_edit'].encode('UTF-8'), '']
+						log.debug(changeparts)
+						entry = (changeparts, id, itemtype, {'external edit auto-detected':True})
+						self.changelog.append(entry)
+						items += 1
+		log.info('%d newly edited pages found' % (items))
+
+		log.info('Reading media/ for possible external edits')
+		root = self.dwdata['conf']['mediadir'].encode('UTF-8')
+		itemtype = 'media'
+		items = 0
+		for path, dirs, files in os.walk(root):
+			for f in files:
+				if fnmatch.fnmatch(f, '_*'): continue
+				if True:
+					filename = os.path.join(path, f)
+					id = os.path.relpath(filename, root).replace('/', ':')
+					timestamp = str(int(os.path.getmtime(filename)))
+					c = last_changelog_entry(itemtype, id) # [date, ip, type, id, user, sum, extra]
+					# if the media is not in meta or the page has newer change, create a log as an external edit
+					if c is None or c[0] < timestamp:
+						type = 'C' if c is None or c[2] == 'D' else 'E'
+						changeparts = [timestamp, '127.0.0.1', type, id, '', self.dwdata['lang']['external_edit'].encode('UTF-8'), '']
+						log.debug(changeparts)
+						entry = (changeparts, id, itemtype, {'external edit auto-detected':True})
+						self.changelog.append(entry)
+						items += 1
+		log.info('%d newly edited media found' % (items))
 
 	def read_user_data(self):
+		# check if requested and available
+		if not self.args.import_user:
+			return
+		elif self.dwdata['conf']['authtype'] != 'authplain':
+			log.warn('The dokuwiki doesn\'t support plain auth, skip loading and importing users data')
+			return
 		log.info('Reading users.auth.php')
 		users_file = self.dwdata['config_cascade']['plainauth.users']['default'].encode('UTF-8')
 		with open(users_file, 'rb') as f:
@@ -175,39 +413,91 @@ class Converter:
 		log.info('Read %d users' % len(self.users))
 
 	def run(self, params):
-		parser = optparse.OptionParser(usage = USAGE)
-		parser.add_option('-o', '--output', dest='outputdir', help='Create git directory at outputdir. Default is "gitdir"', default = 'gitdir')
-		parser.add_option('-q', '--quiet', action='store_const', const=0, dest='verbose', help='Show only warnings and errors')
-		parser.add_option('-v', '--verbose', action='store_const', const=2, dest='verbose', help='Show debug messages', default=1)
-		(options, args) = parser.parse_args(params)
-		level = logging.WARN
-		if options.verbose:
-			level = (logging.WARN, logging.INFO, logging.DEBUG)[options.verbose]
-		log.setLevel(level)
-		self.outputdir = options.outputdir
+		parser = argparse.ArgumentParser(
+			prog='dokuwiki2git',
+			description='''dokuwiki2git converts dokuwiki data directory into a git repository containing the wiki pages, with proper history. Thus, migration to git-backed wiki engines (eg. gollum) becomes easier.''')
+		parser.add_argument('-i', '--incremental', action='store_true', dest='incremental', help='''import only the changes since the HEAD author date if a git repo already exists''')
+		parser.add_argument('-o', '--output', dest='outputdir', default = 'gitdir', metavar='<output dir>', help='''directory to create the git repo (default: %(default)s)''')
+		parser.add_argument('-u', '--users', dest='import_user', action='store_true', help='''record real user name and email in the author field of each commit''')
+		parser.add_argument('-m', '--site-mail', dest='site_mail', default='dokuwiki@localhost', metavar='<text>', action='store', help='''the dummy email address to be recorded as the author email if it's not available''')
+		parser.add_argument('-e', '--external-edit', action='store_true', dest='external_edit', help='''import external edits not recorded in meta .changes''')
+		parser.add_argument('-q', '--quiet', action='store_const', dest='verbose', const=0, default=1, help='''show only warnings and errors''')
+		parser.add_argument('-v', '--verbose', action='store_const', dest='verbose', const=2, default=1, help='''show debug messages''')
+		parser.add_argument('--notes-ref', metavar='<notes ref>', action='store', dest='notes_ref', default='refs/notes/dokuwiki2git', help='''record the import information to this ref (default: %(default)s)''')
+		parser.add_argument('--resolve-move', choices=['none', 'file', 'log'], default='none', action='store', dest='resolve_move', help='''strategy if the meta file id doesn't match the changelog id: "none" to throw an error; "file" to use the meta file id; "log" to use the changelog id and attempt to record file moves (default: %(default)s)''')
+		parser.add_argument('--backup-suffix', metavar='<suffix>', action='store', dest='backup_suffix', default='', help='''find data files from the folders named (attic|media_attic) plus <suffix> and record them as hidden''')
+		parser.add_argument('dwdir', metavar='<dokuwiki dir>', help='''path to dokuwiki''')
+
+		# parse arguments
+		self.args = args = parser.parse_args(params)
+		log.setLevel((logging.WARN, logging.INFO, logging.DEBUG)[args.verbose])
 
 		time_start = time.time()
-		if len(args) == 0:
-			parser.print_help()
-			log.error('Dokuwiki directory is a required argument')
-			sys.exit(1)
+		log.info('Import data from dokuwiki "%s" at "%s"' % (args.dwdir, args.site_mail))
 
-		self.set_dwdata(args[0])
-		self.read_data()
-		log.info('%d commands queued to be executed' % len(self.commands))
-		self.create_git_repository()
-		time_end = time.time()
-		time_took = time_end - time_start
-		log.info('Finished converting dokuwiki "%s" into a git repository "%s", took %.2f seconds' % (self.dwdir, self.outputdir, time_took))
-
-	def set_dwdata(self, dwdir):
-		self.dwdir = dwdir
+		# check and load dokuwiki data
 		try:
-			self.dwdata = json.loads(subprocess.check_output('php dokuwiki.php %s' % self.shell_quote(dwdir), shell=True))
+			self.dwdata = json.loads(subprocess.check_output('php dokuwiki.php %s' % self.shell_quote(args.dwdir), shell=True))
 		except:
 			log.error('Unable to read php scripts from the specified dokuwiki directory')
 			sys.exit(1)
-		log.info('Using Dokuwiki: %s' % self.dwdir)
+		# check output directory
+		if os.path.exists(args.outputdir):
+			if args.incremental:
+				# check whether the output directory is a valid git repo
+				repo_valid = False
+				try:
+					output2gitdir = subprocess.check_output('cd %s && git rev-parse --git-dir 2>/dev/null' % self.shell_quote(args.outputdir), shell=True)
+					output2gitdir = output2gitdir.rstrip()
+					gitdir = output2gitdir if os.path.isabs(output2gitdir) else os.path.join(args.outputdir, output2gitdir)
+					# check whether gitdir is outputdir or a subdirectory of outputdir
+					if not os.path.relpath(gitdir, args.outputdir).startswith(os.pardir + os.sep):
+						repo_valid = True
+				except:
+					pass
+				if not repo_valid:
+					log.error('The specified output directory is not a valid git repository "%s"' % args.outputdir)
+					sys.exit(1)
+				# record the last author date from the active branch if it has at least one commit
+				try:
+					self.since = subprocess.check_output('git --git-dir %s log -n 1 --pretty="format:%%at" 2>/dev/null' % self.shell_quote(gitdir), shell=True)
+					log.info('Import data since %s' % self.since)
+				except:
+					pass
+			else:
+				log.error('There is already something at the output directory path "%s"' % args.outputdir)
+				sys.exit(1)
+		# read user Real Name and email from dokuwiki
+		self.read_user_data()
+
+		# collect history
+		# go through meta/ and media_meta/ *.changes to collect the change history
+		# if "detect external edit" is set, also go through pages/ and media/ for latest version not recorded
+		self.read_meta()
+		if args.external_edit:
+			self.read_pages_and_media()
+		self.changelog.sort()
+		
+		# build commands
+		if not os.path.exists(args.outputdir):
+			self.commands.append('git init --quiet')
+			self.commands.append('git config notes.displayRef %s' % self.shell_quote(self.args.notes_ref))
+			self.commands.append('git config notes.rewriteRef %s' % self.shell_quote(self.args.notes_ref))
+		# for each change history collected, find the corresponding history data file and build the import commands
+		self.read_attic()
+		# check the attic/ and media_attic/ for data files not recorded in the change history
+		self.check_attic()
+		# add a note for importing
+		self.commands.append('git --work-tree . commit --quiet --allow-empty --author="dokuwiki2git <dokuwiki2git@hoxu.github.com>" -m "Dokuwiki data imported by dokuwiki2git"')
+
+		# start running the shell commands
+		log.info('%d commands queued to be executed' % len(self.commands))
+		self.create_git_repository()
+
+		# success, calculate and show the time spent
+		time_end = time.time()
+		time_took = time_end - time_start
+		log.info('Finished converting dokuwiki "%s" into a git repository "%s", took %.2f seconds' % (args.dwdir, self.args.outputdir, time_took))
 
 	def shell_quote(self, str):
 		return "'" + str.replace("'", "'\\''") + "'"
